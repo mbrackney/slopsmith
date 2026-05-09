@@ -12,6 +12,10 @@
 #   sudo bash build-proxmox-ct.sh amd64 slopsmith-ct
 #   sudo bash build-proxmox-ct.sh arm64 slopsmith-ct
 #
+# Environment variables:
+#   ROCKSMITH_SRC_DLC   Path to Rocksmith2014 install (default: /mnt/z/Steam/...)
+#   SKIP_HASH_CHECK=1   Allow builds when SHA256 hashes are not yet pinned
+#
 # Prerequisites (install in WSL):
 #   sudo apt install debootstrap systemd-container tar zstd curl unzip git
 #
@@ -35,7 +39,8 @@ mkdir -p "$BUILD_BASE"
 DOTNET_CHANNEL="10.0"
 VGMSTREAM_URL="https://github.com/vgmstream/vgmstream/releases/download/r2083/vgmstream-linux-cli.zip"
 # Supply-chain hashes — regenerate with:
-#   curl -sL <URL> | sha256sum
+#   curl -fsSL <URL> | sha256sum
+# Leave empty and set SKIP_HASH_CHECK=1 to explicitly opt into unverified downloads.
 VGMSTREAM_SHA256=""  # TODO: pin on first verified download
 DOTNET_INSTALL_SHA256=""  # TODO: pin; changes when Microsoft updates the script
 
@@ -68,7 +73,10 @@ trap cleanup EXIT
 verify_sha256() {
   local file="$1" expected="$2" label="${3:-$1}"
   if [[ -z "$expected" ]]; then
-    warn "No SHA256 pinned for ${label} — skipping verification."
+    if [[ "${SKIP_HASH_CHECK:-0}" != "1" ]]; then
+      die "No SHA256 pinned for ${label}. Pin the hash or set SKIP_HASH_CHECK=1 to proceed."
+    fi
+    warn "No SHA256 pinned for ${label} — skipping verification (SKIP_HASH_CHECK=1)."
     return 0
   fi
   local actual
@@ -132,7 +140,7 @@ debootstrap \
   --include=ca-certificates,curl,gnupg \
   trixie \
   "$ROOTFS" \
-  http://deb.debian.org/debian
+  https://deb.debian.org/debian
 
 ok "Bootstrap complete."
 
@@ -162,7 +170,7 @@ ok "System packages installed."
 #    stage, but in an LXC the runtime must be present)
 # =============================================================================
 info "Installing .NET ${DOTNET_CHANNEL} runtime + SDK …"
-r "curl -sL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh"
+r "curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh"
 verify_sha256 "${ROOTFS}/tmp/dotnet-install.sh" "${DOTNET_INSTALL_SHA256}" "dotnet-install.sh"
 r "chmod +x /tmp/dotnet-install.sh \
     && DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
@@ -223,7 +231,7 @@ rm -rf "${ROOTFS}/usr/share/dotnet/sdk"
 # 5. vgmstream-cli
 # =============================================================================
 info "Installing vgmstream-cli …"
-r "curl -sL '${VGMSTREAM_URL}' -o /tmp/vgm.zip"
+r "curl -fSL '${VGMSTREAM_URL}' -o /tmp/vgm.zip"
 verify_sha256 "${ROOTFS}/tmp/vgm.zip" "${VGMSTREAM_SHA256}" "vgmstream-linux-cli.zip"
 r "unzip -o /tmp/vgm.zip -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/vgmstream-cli \
@@ -253,8 +261,8 @@ for f in requirements.txt server.py VERSION main.py; do
     cp "$f" "${ROOTFS}${APP_DIR}/"
     info "  Copied ${f}"
   else
-    if [[ "$f" == "requirements.txt" ]]; then
-      die "  'requirements.txt' not found – cannot install Python dependencies."
+    if [[ "$f" == "requirements.txt" || "$f" == "main.py" ]]; then
+      die "  '${f}' not found — required for the service to start."
     fi
     warn "  '${f}' not found – skipping."
   fi
@@ -297,7 +305,7 @@ if [[ -f "${ROCKSMITH_SRC_DLC}/songs.psarc" ]]; then
 # =============================================================================
 info "Writing /etc/environment …"
 cat > "${ROOTFS}/etc/environment" <<EOF
-PATH=${VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin
+PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 PYTHONPATH=${APP_DIR}/lib:${APP_DIR}
 RSCLI_PATH=${RSCLI_DIR}/RsCli
 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1

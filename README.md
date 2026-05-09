@@ -173,6 +173,12 @@ pct restore 200 /var/lib/vz/template/cache/slopsmith-ct.tar.zst \
 
 Override the default Rocksmith source path via environment: `ROCKSMITH_SRC_DLC=/path/to/Rocksmith2014 sudo bash build-proxmox-ct.sh`.
 
+The build verifies downloaded files (vgmstream, dotnet-install.sh) against pinned SHA256 hashes. Until hashes are pinned, set `SKIP_HASH_CHECK=1` to allow the build to proceed:
+
+```bash
+sudo SKIP_HASH_CHECK=1 bash build-proxmox-ct.sh amd64 slopsmith-ct
+```
+
 The script is linted with `shellcheck`. Only `amd64` is supported out of the box; `arm64` requires `qemu-user-static` + binfmt registration.
 
 ## Windows 11 install tutorial
