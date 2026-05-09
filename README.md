@@ -153,6 +153,28 @@ volumes:
   slopsmith-config:
 ```
 
+## Proxmox LXC Container
+
+`build-proxmox-ct.sh` builds a self-contained Proxmox LXC rootfs tarball from WSL2. It bootstraps a Debian Trixie rootfs, installs all runtime dependencies (Python, .NET, vgmstream, FFmpeg), builds RsCli, copies the app, and packages the result as a `.tar.zst` importable by `pct restore`.
+
+```bash
+# Prerequisites (WSL2):
+sudo apt install debootstrap systemd-container tar zstd curl unzip git
+
+# Build (run from repo root):
+sudo bash build-proxmox-ct.sh amd64 slopsmith-ct
+
+# Transfer + import on Proxmox:
+scp slopsmith-ct.tar.zst root@proxmox:/var/lib/vz/template/cache/
+pct restore 200 /var/lib/vz/template/cache/slopsmith-ct.tar.zst \
+    --storage local-lvm --rootfs 8 --memory 2048 --cores 2 \
+    --net0 name=eth0,bridge=vmbr0,ip=dhcp --unprivileged 1 --start 1
+```
+
+Override the default Rocksmith source path via environment: `ROCKSMITH_SRC_DLC=/path/to/Rocksmith2014 sudo bash build-proxmox-ct.sh`.
+
+The script is linted with `shellcheck`. Only `amd64` is supported out of the box; `arm64` requires `qemu-user-static` + binfmt registration.
+
 ## Windows 11 install tutorial
 
 https://youtu.be/bIz8pbTFiV8

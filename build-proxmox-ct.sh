@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 # =============================================================================
 # build-proxmox-ct.sh  –  Build a Proxmox LXC rootfs from WSL2 (no lxc-start)
 #
@@ -8,20 +9,20 @@
 #   sudo bash build-proxmox-ct.sh [TARGETARCH] [OUTPUT_NAME]
 #
 # Examples:
-#   sudo bash build-proxmox-ct.sh amd64 rocksmith-ct
-#   sudo bash build-proxmox-ct.sh arm64 rocksmith-ct
+#   sudo bash build-proxmox-ct.sh amd64 slopsmith-ct
+#   sudo bash build-proxmox-ct.sh arm64 slopsmith-ct
 #
 # Prerequisites (install in WSL):
 #   sudo apt install debootstrap systemd-container tar zstd curl unzip git
 #
 # On Proxmox, after transfer:
-#   pct restore <VMID> rocksmith-ct.tar.zst --storage local-lvm --rootfs 8 --unprivileged 1
+#   pct restore <VMID> slopsmith-ct.tar.zst --storage local-lvm --rootfs 8 --unprivileged 1
 # =============================================================================
 
 set -euo pipefail
 
 TARGETARCH="${1:-amd64}"
-OUTPUT_NAME="${2:-rocksmith-ct}"
+OUTPUT_NAME="${2:-slopsmith-ct}"
 
 # debootstrap requires a real Linux filesystem (ext4/tmpfs) – it creates
 # device nodes that NTFS/FUSE mounts (/mnt/c, /mnt/d …) cannot represent.
@@ -31,22 +32,54 @@ BUILD_BASE="/tmp/proxmox-ct-build"
 ROOTFS="${BUILD_BASE}/rootfs"
 mkdir -p "$BUILD_BASE"
 
-PYTHON_VERSION="3.13"
 DOTNET_CHANNEL="10.0"
 VGMSTREAM_URL="https://github.com/vgmstream/vgmstream/releases/download/r2083/vgmstream-linux-cli.zip"
+# Supply-chain hashes — regenerate with:
+#   curl -sL <URL> | sha256sum
+VGMSTREAM_SHA256=""  # TODO: pin on first verified download
+DOTNET_INSTALL_SHA256=""  # TODO: pin; changes when Microsoft updates the script
 
 APP_DIR="/app"
+VENV_DIR="/opt/app-venv"
 RSCLI_DIR="/opt/rscli"
 DLC_DIR="/dlc"
 CONFIG_DIR="/config"
 ROCKSMITH_DIR="/rocksmith"
-ROCKSMITH_SRC_DLC="/mnt/z/Steam/steamapps/common/Rocksmith2014"
+ROCKSMITH_SRC_DLC="${ROCKSMITH_SRC_DLC:-/mnt/z/Steam/steamapps/common/Rocksmith2014}"
+SVC_USER="slopsmith"
 
 # Coloured logging
 info() { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
 ok()   { echo -e "\033[1;32m[OK]\033[0m    $*"; }
 warn() { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
 die()  { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
+
+cleanup() {
+  local rc=$?
+  if [[ $rc -ne 0 && -d "${BUILD_BASE:-}" ]]; then
+    warn "Build failed (exit $rc). Partial rootfs left at ${BUILD_BASE} for inspection."
+    warn "Run 'sudo rm -rf ${BUILD_BASE}' to clean up."
+  fi
+}
+trap cleanup EXIT
+
+# Verify a downloaded file against a pinned SHA256 hash.
+# Skips verification when the expected hash is empty (not yet pinned).
+verify_sha256() {
+  local file="$1" expected="$2" label="${3:-$1}"
+  if [[ -z "$expected" ]]; then
+    warn "No SHA256 pinned for ${label} — skipping verification."
+    return 0
+  fi
+  local actual
+  actual=$(sha256sum "$file" | awk '{print $1}')
+  if [[ "$actual" != "$expected" ]]; then
+    die "SHA256 mismatch for ${label}:\n" \
+        "       expected: ${expected}\n" \
+        "       got:      ${actual}"
+  fi
+  ok "SHA256 verified for ${label}."
+}
 
 [[ $EUID -eq 0 ]] || die "Run as root: sudo bash $0"
 
@@ -55,6 +88,16 @@ case "$TARGETARCH" in
   amd64) RID="linux-x64"   ; DEBIAN_ARCH="amd64" ;;
   *)     die "Unsupported TARGETARCH: ${TARGETARCH}. Expected: amd64 | arm64" ;;
 esac
+
+# arm64 cross-builds require qemu-user-static + binfmt registration
+if [[ "$TARGETARCH" == "arm64" && "$(uname -m)" != "aarch64" ]]; then
+  if ! command -v qemu-aarch64-static &>/dev/null || \
+     ! [[ -d /proc/sys/fs/binfmt_misc ]]; then
+    die "arm64 builds on a non-arm64 host require qemu-user-static and binfmt_misc.\n" \
+        "       Install with: sudo apt install qemu-user-static binfmt-support\n" \
+        "       Then re-run this script."
+  fi
+fi
 
 # Confirm required tools
 for cmd in debootstrap systemd-nspawn curl unzip git tar zstd; do
@@ -71,7 +114,7 @@ r() {
     --quiet \
     --directory="$ROOTFS" \
     --bind-ro=/etc/resolv.conf:/etc/resolv.conf \
-    -- bash -c "$*"
+    -- bash -c "set -e; $1"
 }
 
 # =============================================================================
@@ -100,16 +143,9 @@ echo "nameserver 1.1.1.1" > "$ROOTFS/etc/resolv.conf"
 # =============================================================================
 # 2. System packages  (mirrors Stage 2 apt block)
 # =============================================================================
-#info "Configuring apt sources (bookworm + backports) …"
-#cat > "${ROOTFS}/etc/apt/sources.list" <<EOF
-#deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-#deb http://deb.debian.org/debian bookworm-backports main contrib non-free non-free-firmware
-#deb http://security.debian.org/debian-security bookworm-security main contrib non-free
-#EOF
-
 info "Installing system packages …"
 r "apt-get update -qq && apt-get install -y --no-install-recommends \
-    python${PYTHON_VERSION} python3-pip python3-venv \
+    python3 python3-pip python3-venv \
     ffmpeg \
     fluidsynth \
     fluid-soundfont-gm \
@@ -126,8 +162,9 @@ ok "System packages installed."
 #    stage, but in an LXC the runtime must be present)
 # =============================================================================
 info "Installing .NET ${DOTNET_CHANNEL} runtime + SDK …"
-r "curl -sL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
+r "curl -sL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh"
+verify_sha256 "${ROOTFS}/tmp/dotnet-install.sh" "${DOTNET_INSTALL_SHA256}" "dotnet-install.sh"
+r "chmod +x /tmp/dotnet-install.sh \
     && DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
        DOTNET_CLI_TELEMETRY_OPTOUT=1 \
        /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
@@ -150,6 +187,10 @@ mkdir -p "${ROOTFS}/opt/rs2014/tools/RsCli"
 cp "${PROJECT_DIR}/rscli/RsCli.fsproj" "${ROOTFS}/opt/rs2014/tools/RsCli/"
 cp "${PROJECT_DIR}/rscli/Program.fs"   "${ROOTFS}/opt/rs2014/tools/RsCli/"
  
+# NuGetAudit=false: Rocksmith2014.NET pins older NuGet dependencies that
+# trigger audit warnings.  We don't ship the SDK in the final image — only
+# the self-contained publish output — so these warnings are noise during a
+# build-time-only step.  Re-enable if you upgrade the upstream project.
 info "Patching Directory.Build.props (host-side) …"
 PROPS=$(find "${ROOTFS}/opt/rs2014" -name "Directory.Build.props" | head -1)
 if [[ -z "$PROPS" ]]; then
@@ -166,10 +207,10 @@ FSPROJ_INNER="${FSPROJ_HOST#$ROOTFS}"
 FSPROJ_DIR_INNER="$(dirname "$FSPROJ_INNER")"
 info "  Building project at (container path): ${FSPROJ_DIR_INNER}"
  
-r "export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-   export DOTNET_CLI_TELEMETRY_OPTOUT=1
-   cd '${FSPROJ_DIR_INNER}'
-   dotnet publish -c Release -r '${RID}' --self-contained -o '${RSCLI_DIR}'"
+r "export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+    && export DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    && cd '${FSPROJ_DIR_INNER}' \
+    && dotnet publish -c Release -r '${RID}' --self-contained -o '${RSCLI_DIR}'"
  
 # Clean up build artifacts to keep the image lean
 rm -rf "${ROOTFS}/opt/rs2014" "${ROOTFS}/root/.nuget" "${ROOTFS}/root/.dotnet/toolResolverCache"
@@ -182,8 +223,9 @@ rm -rf "${ROOTFS}/usr/share/dotnet/sdk"
 # 5. vgmstream-cli
 # =============================================================================
 info "Installing vgmstream-cli …"
-r "curl -sL '${VGMSTREAM_URL}' -o /tmp/vgm.zip \
-    && unzip -o /tmp/vgm.zip -d /usr/local/bin/ \
+r "curl -sL '${VGMSTREAM_URL}' -o /tmp/vgm.zip"
+verify_sha256 "${ROOTFS}/tmp/vgm.zip" "${VGMSTREAM_SHA256}" "vgmstream-linux-cli.zip"
+r "unzip -o /tmp/vgm.zip -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/vgmstream-cli \
     && rm /tmp/vgm.zip"
 ok "vgmstream-cli installed."
@@ -218,9 +260,10 @@ for f in requirements.txt server.py VERSION main.py; do
   fi
 done
 
-info "Installing Python dependencies …"
-r "pip install --no-cache-dir --break-system-packages -r ${APP_DIR}/requirements.txt"
-ok "Python dependencies installed."
+info "Creating Python venv and installing dependencies …"
+r "python3 -m venv ${VENV_DIR} \
+    && ${VENV_DIR}/bin/pip install --no-cache-dir -r ${APP_DIR}/requirements.txt"
+ok "Python venv + dependencies installed."
 
 # =============================================================================
 # 7. Data directories + assets
@@ -235,8 +278,8 @@ if [[ -d "config" ]]; then
     warn "  config/ not found."
   fi
 
-if compgen -G "${ROCKSMITH_SRC_DIC}/dlc/*_p.psarc" &>/dev/null; then
-  cp "${ROCKSMITH_SRC_DIC}"/dlc/*_p.psarc "${ROOTFS}${DLC_DIR}/"
+if compgen -G "${ROCKSMITH_SRC_DLC}/dlc/*_p.psarc" &>/dev/null; then
+  cp "${ROCKSMITH_SRC_DLC}"/dlc/*_p.psarc "${ROOTFS}${DLC_DIR}/"
   info "  Copied DLC psarc files."
 else
   warn "  No *_p.psarc files found – copy them into ${DLC_DIR} on Proxmox."
@@ -254,6 +297,7 @@ if [[ -f "${ROCKSMITH_SRC_DLC}/songs.psarc" ]]; then
 # =============================================================================
 info "Writing /etc/environment …"
 cat > "${ROOTFS}/etc/environment" <<EOF
+PATH=${VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin
 PYTHONPATH=${APP_DIR}/lib:${APP_DIR}
 RSCLI_PATH=${RSCLI_DIR}/RsCli
 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
@@ -264,17 +308,23 @@ EOF
 # =============================================================================
 # 9. systemd service for uvicorn
 # =============================================================================
-info "Installing rocksmith-server.service …"
+info "Creating service user '${SVC_USER}' …"
+r "useradd --system --home-dir ${APP_DIR} --shell /usr/sbin/nologin ${SVC_USER}"
+ok "User '${SVC_USER}' created."
+
+info "Installing slopsmith-server.service …"
 mkdir -p "${ROOTFS}/etc/systemd/system"
-cat > "${ROOTFS}/etc/systemd/system/rocksmith-server.service" <<EOF
+cat > "${ROOTFS}/etc/systemd/system/slopsmith-server.service" <<EOF
 [Unit]
-Description=Rocksmith uvicorn server
+Description=Slopsmith uvicorn server
 After=network.target
 
 [Service]
+User=${SVC_USER}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=/etc/environment
-ExecStart=python3 main.py
+ExecStart=${VENV_DIR}/bin/python3 main.py
 Restart=on-failure
 RestartSec=5
 
@@ -284,8 +334,8 @@ EOF
 
 # Enable by symlinking (avoids running systemctl inside nspawn)
 mkdir -p "${ROOTFS}/etc/systemd/system/multi-user.target.wants"
-ln -sf /etc/systemd/system/rocksmith-server.service \
-       "${ROOTFS}/etc/systemd/system/multi-user.target.wants/rocksmith-server.service"
+ln -sf /etc/systemd/system/slopsmith-server.service \
+       "${ROOTFS}/etc/systemd/system/multi-user.target.wants/slopsmith-server.service"
 ok "Service enabled."
 
 # =============================================================================
@@ -294,10 +344,10 @@ ok "Service enabled."
 info "Applying Proxmox CT compatibility tweaks …"
 
 # (a) Ensure a working /etc/hostname and /etc/hosts
-echo "rocksmith" > "${ROOTFS}/etc/hostname"
+echo "slopsmith" > "${ROOTFS}/etc/hostname"
 cat > "${ROOTFS}/etc/hosts" <<EOF
 127.0.0.1   localhost
-127.0.1.1   rocksmith
+127.0.1.1   slopsmith
 ::1         localhost ip6-localhost ip6-loopback
 EOF
 
@@ -329,8 +379,12 @@ rm -f "${ROOTFS}/etc/resolv.conf"
 ln -sf /run/systemd/resolve/stub-resolv.conf "${ROOTFS}/etc/resolv.conf"
 
 # (e) Ensure correct permissions on key dirs
-chown -R 0:0 "${ROOTFS}${APP_DIR}" "${ROOTFS}${RSCLI_DIR}" \
-              "${ROOTFS}${CONFIG_DIR}" "${ROOTFS}${DLC_DIR}" \
+SVC_UID="$(r "id -u ${SVC_USER}")"
+SVC_GID="$(r "id -g ${SVC_USER}")"
+chown -R "${SVC_UID}:${SVC_GID}" \
+              "${ROOTFS}${APP_DIR}" "${ROOTFS}${CONFIG_DIR}" \
+              "${ROOTFS}${DLC_DIR}" "${ROOTFS}${VENV_DIR}"
+chown -R 0:0 "${ROOTFS}${RSCLI_DIR}" \
               "${ROOTFS}${ROCKSMITH_DIR}"
 
 ok "Proxmox tweaks applied."
@@ -374,6 +428,6 @@ cat <<DONE
         --start 1
 
   Then check the server:
-    pct exec 200 -- systemctl status rocksmith-server
+    pct exec 200 -- systemctl status slopsmith-server
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DONE
