@@ -40,7 +40,7 @@ RSCLI_DIR="/opt/rscli"
 DLC_DIR="/dlc"
 CONFIG_DIR="/config"
 ROCKSMITH_DIR="/rocksmith"
-ROCKSMITH_SRC_DIC="/mnt/z/Steam/steamapps/common/Rocksmith2014"
+ROCKSMITH_SRC_DLC="/mnt/z/Steam/steamapps/common/Rocksmith2014"
 
 # Coloured logging
 info() { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
@@ -53,7 +53,7 @@ die()  { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 case "$TARGETARCH" in
   arm64) RID="linux-arm64" ; DEBIAN_ARCH="arm64" ;;
   amd64) RID="linux-x64"   ; DEBIAN_ARCH="amd64" ;;
-  *)     RID="linux-x64"   ; DEBIAN_ARCH="amd64" ;;
+  *)     die "Unsupported TARGETARCH: ${TARGETARCH}. Expected: amd64 | arm64" ;;
 esac
 
 # Confirm required tools
@@ -63,7 +63,8 @@ done
 
 # =============================================================================
 # Helper: run a command inside the rootfs via systemd-nspawn
-# --pipe keeps stdin/stdout connected; --quiet suppresses nspawn chatter.
+# --pipe keeps stdin/stdout connected; 
+# Or --quiet suppresses nspawn chatter.
 # =============================================================================
 r() {
   systemd-nspawn \
@@ -197,13 +198,24 @@ mkdir -p \
   "${ROOTFS}${APP_DIR}/plugins"
 
 for d in lib static plugins; do
-  [[ -d "$d" ]] && cp -r "${d}/." "${ROOTFS}${APP_DIR}/${d}/" \
-    && info "  Copied ${d}/" || warn "  Local '${d}/' not found – skipping."
+  if [[ -d "$d" ]]; then
+    cp -r "${d}/." "${ROOTFS}${APP_DIR}/${d}/"
+    info "  Copied ${d}/"
+  else
+    warn "  Local '${d}/' not found – skipping."
+  fi
 done
 
 for f in requirements.txt server.py VERSION main.py; do
-  [[ -f "$f" ]] && cp "$f" "${ROOTFS}${APP_DIR}/" \
-    && info "  Copied ${f}" || warn "  '${f}' not found – skipping."
+  if [[ -f "$f" ]]; then
+    cp "$f" "${ROOTFS}${APP_DIR}/"
+    info "  Copied ${f}"
+  else
+    if [[ "$f" == "requirements.txt" ]]; then
+      die "  'requirements.txt' not found – cannot install Python dependencies."
+    fi
+    warn "  '${f}' not found – skipping."
+  fi
 done
 
 info "Installing Python dependencies …"
@@ -216,8 +228,12 @@ ok "Python dependencies installed."
 info "Populating data directories …"
 mkdir -p "${ROOTFS}${CONFIG_DIR}" "${ROOTFS}${DLC_DIR}" "${ROOTFS}${ROCKSMITH_DIR}"
 
-[[ -d "config" ]] && cp -r config/. "${ROOTFS}${CONFIG_DIR}/" \
-  && info "  Copied config/" || warn "  config/ not found."
+if [[ -d "config" ]]; then
+    cp -r config/. "${ROOTFS}${CONFIG_DIR}/"
+    info "  Copied config/"
+  else
+    warn "  config/ not found."
+  fi
 
 if compgen -G "${ROCKSMITH_SRC_DIC}/dlc/*_p.psarc" &>/dev/null; then
   cp "${ROCKSMITH_SRC_DIC}"/dlc/*_p.psarc "${ROOTFS}${DLC_DIR}/"
@@ -226,8 +242,12 @@ else
   warn "  No *_p.psarc files found – copy them into ${DLC_DIR} on Proxmox."
 fi
 
-[[ -f "${ROCKSMITH_SRC_DIC}/songs.psarc" ]] && cp "${ROCKSMITH_SRC_DIC}/songs.psarc" "${ROOTFS}${ROCKSMITH_DIR}/" \
-  && info "  Copied songs.psarc" || warn "  songs.psarc not found."
+if [[ -f "${ROCKSMITH_SRC_DLC}/songs.psarc" ]]; then
+    cp "${ROCKSMITH_SRC_DLC}/songs.psarc" "${ROOTFS}${ROCKSMITH_DIR}/"
+    info "  Copied songs.psarc"
+  else
+    warn "  songs.psarc not found."
+  fi
 
 # =============================================================================
 # 8. Environment variables
