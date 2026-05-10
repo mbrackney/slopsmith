@@ -53,26 +53,29 @@ PROJECT_DIR="$(pwd)"          # may be on /mnt/d – that's fine for source file
 # collide on /tmp/proxmox-ct-build/rootfs. BUILD_BASE can still be overridden
 # via the environment for users who want a known, reusable path.
 BUILD_BASE="${BUILD_BASE:-/tmp/proxmox-ct-build-${OUTPUT_NAME}-${TARGETARCH}}"
-ROOTFS="${BUILD_BASE}/rootfs"
-
 # Safety net: BUILD_BASE feeds rm -rf in the cleanup trap, the rebuild flow,
 # and (indirectly) the rootfs build. Refuse obviously dangerous values up
 # front so a stray BUILD_BASE=/ or BUILD_BASE='' can never `rm -rf` the host.
 case "$BUILD_BASE" in
   ""|/|//|/.*|.|./*|../*) echo "[ERROR] Refusing dangerous BUILD_BASE='${BUILD_BASE}'." >&2; exit 1 ;;
 esac
-# Require an absolute, non-trivial path; default to /tmp unless the caller
-# explicitly opts out via I_KNOW_WHAT_IM_DOING=1.
 if [[ "${BUILD_BASE}" != /* ]]; then
   echo "[ERROR] BUILD_BASE must be an absolute path (got: '${BUILD_BASE}')." >&2
   exit 1
 fi
+
+# Normalize so that things like /tmp/../etc resolve against the real prefix
+# check below — without this, a path-traversal payload would slip past the
+# /tmp/* match and the cleanup branches could rm-rf an unintended host path.
+BUILD_BASE=$(realpath -m -- "$BUILD_BASE")
+ROOTFS="${BUILD_BASE}/rootfs"
+
 if (( ${#BUILD_BASE} < 6 )); then
   echo "[ERROR] BUILD_BASE='${BUILD_BASE}' is too short — refusing for safety." >&2
   exit 1
 fi
 if [[ "${BUILD_BASE}" != /tmp/* && "${I_KNOW_WHAT_IM_DOING:-0}" != "1" ]]; then
-  echo "[ERROR] BUILD_BASE='${BUILD_BASE}' is outside /tmp." >&2
+  echo "[ERROR] BUILD_BASE='${BUILD_BASE}' resolves outside /tmp." >&2
   echo "        Re-run with I_KNOW_WHAT_IM_DOING=1 to use a non-/tmp path." >&2
   exit 1
 fi
@@ -387,11 +390,11 @@ info "Populating data directories …"
 mkdir -p "${ROOTFS}${CONFIG_DIR}" "${ROOTFS}${DLC_DIR}" "${ROOTFS}${ROCKSMITH_DIR}"
 
 if [[ -d "config" ]]; then
-    cp -r config/. "${ROOTFS}${CONFIG_DIR}/"
-    info "  Copied config/"
-  else
-    warn "  config/ not found."
-  fi
+  cp -r config/. "${ROOTFS}${CONFIG_DIR}/"
+  info "  Copied config/"
+else
+  warn "  config/ not found."
+fi
 
 if compgen -G "${ROCKSMITH_SRC_DIR}/dlc/*_p.psarc" &>/dev/null; then
   cp "${ROCKSMITH_SRC_DIR}"/dlc/*_p.psarc "${ROOTFS}${DLC_DIR}/"
@@ -401,11 +404,11 @@ else
 fi
 
 if [[ -f "${ROCKSMITH_SRC_DIR}/songs.psarc" ]]; then
-    cp "${ROCKSMITH_SRC_DIR}/songs.psarc" "${ROOTFS}${ROCKSMITH_DIR}/"
-    info "  Copied songs.psarc"
-  else
-    warn "  songs.psarc not found."
-  fi
+  cp "${ROCKSMITH_SRC_DIR}/songs.psarc" "${ROOTFS}${ROCKSMITH_DIR}/"
+  info "  Copied songs.psarc"
+else
+  warn "  songs.psarc not found."
+fi
 
 # =============================================================================
 # 8. Environment variables
@@ -506,11 +509,7 @@ for svc in systemd-networkd systemd-resolved; do
   ln -sf "${unit_src}" "${ROOTFS}/etc/systemd/system/multi-user.target.wants/${svc}.service"
 done
 
-# (d) Fix resolv.conf to use systemd-resolved stub
-rm -f "${ROOTFS}/etc/resolv.conf"
-ln -sf /run/systemd/resolve/stub-resolv.conf "${ROOTFS}/etc/resolv.conf"
-
-# (e) Ensure correct permissions on key dirs.
+# (d) Ensure correct permissions on key dirs.
 # -h preserves symlinks: a Python venv keeps /opt/app-venv/bin/python3 as a
 # symlink to /usr/bin/python3, and a plain `chown -R` would chase it and
 # rewrite the system interpreter's ownership inside the rootfs.
@@ -521,6 +520,15 @@ chown -hR "${SVC_UID}:${SVC_GID}" \
               "${ROOTFS}${DLC_DIR}" "${ROOTFS}${VENV_DIR}"
 chown -hR 0:0 "${ROOTFS}${RSCLI_DIR}" \
               "${ROOTFS}${ROCKSMITH_DIR}"
+
+# (e) Fix resolv.conf to use the systemd-resolved stub. MUST run after the
+# last r() invocation: r() bind-mounts the host /etc/resolv.conf onto the
+# rootfs path, and systemd-nspawn follows symlinks when resolving the bind
+# target — pointing /etc/resolv.conf at /run/systemd/resolve/stub-resolv.conf
+# before that would make subsequent r() calls try to bind onto a path that
+# doesn't exist during the build.
+rm -f "${ROOTFS}/etc/resolv.conf"
+ln -sf /run/systemd/resolve/stub-resolv.conf "${ROOTFS}/etc/resolv.conf"
 
 ok "Proxmox tweaks applied."
 
