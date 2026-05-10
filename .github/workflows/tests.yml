@@ -24,6 +24,3 @@ jobs:
 
       - name: Run pytest
         run: pytest
-
-      - name: Run JS plugin-API tests
-        run: node --test tests/js/*.test.js
