@@ -33,14 +33,13 @@ from pathlib import Path
 
 import yaml
 
-# Make `lib/` importable regardless of CWD so we can share the ffmpeg
-# encode helper with lib/sloppak_convert.py (libvorbis fallback lives there).
+# Make `lib/` importable regardless of CWD so we can share ffmpeg
+# helpers (including the libvorbis → built-in vorbis fallback).
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 sys.path.insert(0, str(_ROOT / "lib"))
 
-from audio import _ffmpeg_cmd  # noqa: E402
-from sloppak_convert import _ffmpeg_wav_to_ogg  # noqa: E402
+from audio import _ffmpeg_cmd, _ffmpeg_wav_to_ogg  # noqa: E402
 
 
 # Demucs outputs WAVs named {stem}.wav in a per-track subfolder. We re-encode

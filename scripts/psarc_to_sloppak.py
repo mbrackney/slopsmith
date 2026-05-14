@@ -40,8 +40,7 @@ import yaml  # noqa: E402
 
 from patcher import unpack_psarc  # noqa: E402
 from song import load_song, arrangement_to_wire  # noqa: E402
-from audio import find_wem_files, _vgmstream_cmd, _ffmpeg_cmd  # noqa: E402
-from sloppak_convert import _ffmpeg_wav_to_ogg  # noqa: E402
+from audio import find_wem_files, _vgmstream_cmd, _ffmpeg_cmd, _ffmpeg_wav_to_ogg  # noqa: E402
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

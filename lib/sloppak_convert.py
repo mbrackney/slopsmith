@@ -31,7 +31,7 @@ import yaml
 
 from patcher import unpack_psarc
 from song import load_song, arrangement_to_wire
-from audio import find_wem_files, _vgmstream_cmd, _ffmpeg_cmd
+from audio import find_wem_files, _vgmstream_cmd, _ffmpeg_cmd, _ffmpeg_wav_to_ogg
 
 
 ProgressCB = Optional[Callable[[float, str, str], None]]
@@ -62,27 +62,6 @@ def _arrangement_id(name: str, used: set[str]) -> str:
         i += 1
     used.add(candidate)
     return candidate
-
-
-def _ffmpeg_wav_to_ogg(ffmpeg: str, wav: Path, out_ogg: Path) -> subprocess.CompletedProcess:
-    """Encode WAV → Ogg Vorbis. Prefers libvorbis (external, full quality);
-    if the ffmpeg build lacks it (some Homebrew formulas no longer set
-    --enable-libvorbis), retries with ffmpeg's built-in `vorbis` encoder
-    under `-strict experimental`. Same .ogg container either way; the
-    built-in path produces a lower-quality file but always works."""
-    r = subprocess.run(
-        [ffmpeg, "-y", "-i", str(wav), "-c:a", "libvorbis", "-q:a", "5", str(out_ogg)],
-        capture_output=True,
-    )
-    if r.returncode == 0 and out_ogg.exists() and out_ogg.stat().st_size >= 100:
-        return r
-    if b"Unknown encoder 'libvorbis'" not in (r.stderr or b""):
-        return r
-    return subprocess.run(
-        [ffmpeg, "-y", "-i", str(wav),
-         "-c:a", "vorbis", "-strict", "experimental", "-q:a", "5", str(out_ogg)],
-        capture_output=True,
-    )
 
 
 def _wem_to_ogg(wem_path: str, out_ogg: Path) -> None:

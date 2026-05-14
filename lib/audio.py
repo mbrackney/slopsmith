@@ -47,6 +47,27 @@ def _ffmpeg_cmd() -> str | None:
     return _bundled_or_path("ffmpeg")
 
 
+def _ffmpeg_wav_to_ogg(ffmpeg: str, wav: Path, out_ogg: Path) -> subprocess.CompletedProcess:
+    """Encode WAV → Ogg Vorbis. Prefers libvorbis (external, full quality);
+    if the ffmpeg build lacks it (some Homebrew formulas no longer set
+    --enable-libvorbis), retries with ffmpeg's built-in `vorbis` encoder
+    under `-strict experimental`. Same .ogg container either way; the
+    built-in path produces a lower-quality file but always works."""
+    r = subprocess.run(
+        [ffmpeg, "-y", "-i", str(wav), "-c:a", "libvorbis", "-q:a", "5", str(out_ogg)],
+        capture_output=True,
+    )
+    if r.returncode == 0 and out_ogg.exists() and out_ogg.stat().st_size >= 100:
+        return r
+    if b"Unknown encoder 'libvorbis'" not in (r.stderr or b""):
+        return r
+    return subprocess.run(
+        [ffmpeg, "-y", "-i", str(wav),
+         "-c:a", "vorbis", "-strict", "experimental", "-q:a", "5", str(out_ogg)],
+        capture_output=True,
+    )
+
+
 def find_wem_files(extracted_dir: str) -> list[str]:
     """Find WEM audio files, sorted largest first (full song before preview)."""
     wem_files = list(Path(extracted_dir).rglob("*.wem"))
