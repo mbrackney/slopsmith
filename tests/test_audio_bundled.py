@@ -10,6 +10,7 @@ detect the desktop layout via the vgmstream-cli marker and prefer the
 bundled binary; outside the bundle, `shutil.which` is used unchanged.
 """
 
+import os
 import shutil
 
 import audio
@@ -21,6 +22,12 @@ def _set_audio_file(monkeypatch, fake_lib_dir):
     monkeypatch.setattr(audio, "__file__", str(fake_lib_dir / "audio.py"))
 
 
+def _touch_exec(path):
+    """Create `path` and mark it executable so _is_executable() accepts it."""
+    path.write_text("")
+    path.chmod(0o755)
+
+
 def test_bundled_bin_dir_returns_path_when_vgmstream_marker_present(tmp_path, monkeypatch):
     """Desktop-bundle layout: resources/slopsmith/lib/audio.py with a
     vgmstream-cli marker file in resources/bin/."""
@@ -29,7 +36,7 @@ def test_bundled_bin_dir_returns_path_when_vgmstream_marker_present(tmp_path, mo
     fake_lib.mkdir(parents=True)
     fake_bin = fake_resources / "bin"
     fake_bin.mkdir()
-    (fake_bin / "vgmstream-cli").write_text("")  # marker
+    _touch_exec(fake_bin / "vgmstream-cli")  # marker
 
     _set_audio_file(monkeypatch, fake_lib)
 
@@ -48,7 +55,7 @@ def test_bundled_bin_dir_returns_none_without_marker(tmp_path, monkeypatch):
     fake_bin.mkdir()
     # No vgmstream-cli marker. Drop an ffmpeg there to make sure absence
     # of the marker still wins over presence of the target binary.
-    (fake_bin / "ffmpeg").write_text("")
+    _touch_exec(fake_bin / "ffmpeg")
 
     _set_audio_file(monkeypatch, fake_lib)
 
@@ -74,8 +81,8 @@ def test_bundled_or_path_prefers_bundled_when_marker_present(tmp_path, monkeypat
     fake_lib.mkdir(parents=True)
     fake_bin = fake_resources / "bin"
     fake_bin.mkdir()
-    (fake_bin / "vgmstream-cli").write_text("")
-    (fake_bin / "ffmpeg").write_text("")
+    _touch_exec(fake_bin / "vgmstream-cli")
+    _touch_exec(fake_bin / "ffmpeg")
 
     _set_audio_file(monkeypatch, fake_lib)
 
@@ -120,10 +127,51 @@ def test_bundled_or_path_falls_through_to_which_when_bundle_has_marker_but_not_t
     fake_lib.mkdir(parents=True)
     fake_bin = fake_resources / "bin"
     fake_bin.mkdir()
-    (fake_bin / "vgmstream-cli").write_text("")  # marker present
+    _touch_exec(fake_bin / "vgmstream-cli")  # marker present
     # ffmpeg deliberately NOT in fake_bin
 
     _set_audio_file(monkeypatch, fake_lib)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
 
     assert audio._bundled_or_path("ffmpeg") == "/usr/bin/ffmpeg"
+
+
+def test_bundled_or_path_falls_through_to_which_when_bundled_lacks_exec_bit(tmp_path, monkeypatch):
+    """If the bundle is detected (executable vgmstream-cli marker present)
+    but the *target* binary exists without the exec bit (broken bundle,
+    or a malformed copy step), we must not return that non-executable
+    path — subprocess.run() would PermissionError. Fall through to PATH
+    instead so the user gets a working binary (and the diagnostic comes
+    from a downstream "encoder X not found" rather than an obscure
+    PermissionError on the bundled file)."""
+    fake_resources = tmp_path / "resources"
+    fake_lib = fake_resources / "slopsmith" / "lib"
+    fake_lib.mkdir(parents=True)
+    fake_bin = fake_resources / "bin"
+    fake_bin.mkdir()
+    _touch_exec(fake_bin / "vgmstream-cli")  # executable marker
+    # Drop a non-executable ffmpeg shim.
+    (fake_bin / "ffmpeg").write_text("")
+    (fake_bin / "ffmpeg").chmod(0o644)
+
+    _set_audio_file(monkeypatch, fake_lib)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
+
+    assert audio._bundled_or_path("ffmpeg") == "/usr/bin/ffmpeg"
+
+
+def test_bundled_bin_dir_rejects_non_executable_marker(tmp_path, monkeypatch):
+    """A vgmstream-cli that exists but isn't executable is treated as an
+    invalid marker — the bundle is broken, so detection should fail and
+    every helper should fall through to PATH."""
+    fake_resources = tmp_path / "resources"
+    fake_lib = fake_resources / "slopsmith" / "lib"
+    fake_lib.mkdir(parents=True)
+    fake_bin = fake_resources / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "vgmstream-cli").write_text("")
+    (fake_bin / "vgmstream-cli").chmod(0o644)  # not executable
+
+    _set_audio_file(monkeypatch, fake_lib)
+
+    assert audio._bundled_bin_dir() is None

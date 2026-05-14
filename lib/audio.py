@@ -6,16 +6,25 @@ import subprocess
 from pathlib import Path
 
 
+def _is_executable(path: Path) -> bool:
+    """Treat a candidate binary as usable only when it's both present and
+    executable. On a broken bundle (file shipped without the exec bit, or
+    a partial install) this lets us fall through to PATH instead of
+    handing a non-executable path to subprocess.run and hitting
+    PermissionError at the call site."""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
 def _bundled_bin_dir() -> Path | None:
     """Resolve the desktop bundle's resources/bin/ directory if we're
     running inside one. Layout: resources/slopsmith/lib/audio.py →
-    resources/bin/. Gate on vgmstream-cli's presence so we don't
-    misidentify random parent dirs (e.g. Docker's `/bin`, dev
-    layouts where parents[2] resolves to the repo root) — vgmstream-cli
-    is bundled on every desktop platform and isn't a typical system
-    binary, so it's a precise signature for the desktop layout."""
+    resources/bin/. Gate on an *executable* vgmstream-cli so we don't
+    misidentify random parent dirs (e.g. Docker's `/bin`, dev layouts
+    where parents[2] resolves to the repo root) — vgmstream-cli is
+    bundled on every desktop platform and isn't a typical system binary,
+    so it's a precise signature for the desktop layout."""
     bundled = Path(__file__).resolve().parents[2] / "bin"
-    if any((bundled / n).is_file() for n in ("vgmstream-cli", "vgmstream-cli.exe")):
+    if any(_is_executable(bundled / n) for n in ("vgmstream-cli", "vgmstream-cli.exe")):
         return bundled
     return None
 
@@ -32,7 +41,7 @@ def _bundled_or_path(name: str) -> str | None:
     if bundled is not None:
         for fname in (name, f"{name}.exe"):
             cand = bundled / fname
-            if cand.is_file():
+            if _is_executable(cand):
                 return str(cand)
     return shutil.which(name)
 
