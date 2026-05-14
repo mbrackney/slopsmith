@@ -64,6 +64,27 @@ def _arrangement_id(name: str, used: set[str]) -> str:
     return candidate
 
 
+def _ffmpeg_wav_to_ogg(ffmpeg: str, wav: Path, out_ogg: Path) -> subprocess.CompletedProcess:
+    """Encode WAV → Ogg Vorbis. Prefers libvorbis (external, full quality);
+    if the ffmpeg build lacks it (some Homebrew formulas no longer set
+    --enable-libvorbis), retries with ffmpeg's built-in `vorbis` encoder
+    under `-strict experimental`. Same .ogg container either way; the
+    built-in path produces a lower-quality file but always works."""
+    r = subprocess.run(
+        [ffmpeg, "-y", "-i", str(wav), "-c:a", "libvorbis", "-q:a", "5", str(out_ogg)],
+        capture_output=True,
+    )
+    if r.returncode == 0 and out_ogg.exists() and out_ogg.stat().st_size >= 100:
+        return r
+    if b"Unknown encoder 'libvorbis'" not in (r.stderr or b""):
+        return r
+    return subprocess.run(
+        [ffmpeg, "-y", "-i", str(wav),
+         "-c:a", "vorbis", "-strict", "experimental", "-q:a", "5", str(out_ogg)],
+        capture_output=True,
+    )
+
+
 def _wem_to_ogg(wem_path: str, out_ogg: Path) -> None:
     vgmstream = _vgmstream_cmd()
     ffmpeg = _ffmpeg_cmd()
@@ -80,10 +101,7 @@ def _wem_to_ogg(wem_path: str, out_ogg: Path) -> None:
                 f"vgmstream-cli failed: {r.stderr.decode(errors='replace')}"
             )
         out_ogg.parent.mkdir(parents=True, exist_ok=True)
-        r2 = subprocess.run(
-            [ffmpeg, "-y", "-i", str(wav), "-c:a", "libvorbis", "-q:a", "5", str(out_ogg)],
-            capture_output=True,
-        )
+        r2 = _ffmpeg_wav_to_ogg(ffmpeg, wav, out_ogg)
         if r2.returncode != 0 or not out_ogg.exists() or out_ogg.stat().st_size < 100:
             raise RuntimeError(
                 f"ffmpeg OGG encode failed: {r2.stderr.decode(errors='replace')}"
@@ -455,11 +473,7 @@ def _run_demucs(full_ogg: Path, out_dir: Path, model: str) -> Path:
 def _encode_ogg(wav_path: Path, ogg_path: Path) -> None:
     ffmpeg = _ffmpeg_cmd() or "ffmpeg"
     ogg_path.parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(
-        [ffmpeg, "-y", "-i", str(wav_path),
-         "-c:a", "libvorbis", "-q:a", "5", str(ogg_path)],
-        capture_output=True,
-    )
+    r = _ffmpeg_wav_to_ogg(ffmpeg, wav_path, ogg_path)
     if r.returncode != 0 or not ogg_path.exists():
         raise RuntimeError(
             f"ffmpeg OGG encode failed for {wav_path.name}: "

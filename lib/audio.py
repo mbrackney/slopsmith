@@ -6,14 +6,45 @@ import subprocess
 from pathlib import Path
 
 
+def _bundled_bin_dir() -> Path | None:
+    """Resolve the desktop bundle's resources/bin/ directory if we're
+    running inside one. Layout: resources/slopsmith/lib/audio.py →
+    resources/bin/. Gate on vgmstream-cli's presence so we don't
+    misidentify random parent dirs (e.g. Docker's `/bin`, dev
+    layouts where parents[2] resolves to the repo root) — vgmstream-cli
+    is bundled on every desktop platform and isn't a typical system
+    binary, so it's a precise signature for the desktop layout."""
+    bundled = Path(__file__).resolve().parents[2] / "bin"
+    if any((bundled / n).is_file() for n in ("vgmstream-cli", "vgmstream-cli.exe")):
+        return bundled
+    return None
+
+
+def _bundled_or_path(name: str) -> str | None:
+    """Prefer the bundled binary on desktop, fall back to PATH lookup.
+
+    Necessary because Electron's child PATH on macOS / Linux puts
+    user-installed binaries (Homebrew `/opt/homebrew/bin`, /usr/local)
+    before our `resources/bin`, so `shutil.which` alone picks up the
+    user's binary — which may have been built without the features
+    we rely on (e.g. Homebrew ffmpeg formulas that omit libvorbis)."""
+    bundled = _bundled_bin_dir()
+    if bundled is not None:
+        for fname in (name, f"{name}.exe"):
+            cand = bundled / fname
+            if cand.is_file():
+                return str(cand)
+    return shutil.which(name)
+
+
 def _vgmstream_cmd() -> str | None:
-    """Return the path to vgmstream-cli if available."""
-    return shutil.which("vgmstream-cli")
+    """Return the path to vgmstream-cli, preferring the bundled binary."""
+    return _bundled_or_path("vgmstream-cli")
 
 
 def _ffmpeg_cmd() -> str | None:
-    """Return the path to ffmpeg if available."""
-    return shutil.which("ffmpeg")
+    """Return the path to ffmpeg, preferring the bundled binary."""
+    return _bundled_or_path("ffmpeg")
 
 
 def find_wem_files(extracted_dir: str) -> list[str]:
