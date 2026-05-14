@@ -395,3 +395,102 @@ def test_run_demucs_bootstrap_runs_demucs_main(tmp_path, monkeypatch):
     assert "runpy.run_module" in bootstrap
     assert "demucs" in bootstrap
     assert "run_name='__main__'" in bootstrap or 'run_name="__main__"' in bootstrap
+
+
+# ── _ffmpeg_wav_to_ogg libvorbis → built-in fallback ────────────────────────
+# Tester report: ffmpeg builds without --enable-libvorbis emit
+# "Unknown encoder 'libvorbis'". The helper retries with ffmpeg's built-in
+# `vorbis -strict experimental` so .ogg encoding still works.
+
+def _stub_ffmpeg_run(responses: list, captured_cmds: list):
+    """Stub subprocess.run that returns successive SimpleNamespace responses
+    and records each cmd invocation. responses are dicts forwarded as kwargs
+    to SimpleNamespace (returncode/stdout/stderr)."""
+    def fake_run(cmd, capture_output=False, **kwargs):
+        captured_cmds.append(list(cmd))
+        if not responses:
+            raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+        resp = responses.pop(0)
+        # Side effect: emulate ffmpeg writing the output file on success
+        # so the helper's exists()/stat() check passes.
+        if resp.get("returncode") == 0 and resp.get("write_output"):
+            out_path = cmd[-1]
+            from pathlib import Path as _P
+            p = _P(out_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"\x00" * 200)  # > 100-byte size guard
+        return SimpleNamespace(
+            returncode=resp.get("returncode", 0),
+            stdout=resp.get("stdout", b""),
+            stderr=resp.get("stderr", b""),
+        )
+    return fake_run
+
+
+def test_ffmpeg_wav_to_ogg_libvorbis_first_succeeds(tmp_path, monkeypatch):
+    """libvorbis succeeds → no retry, only one subprocess call."""
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"\x00" * 200)
+    out_ogg = tmp_path / "out.ogg"
+    cmds: list = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        _stub_ffmpeg_run([{"returncode": 0, "write_output": True}], cmds),
+    )
+
+    r = sloppak_convert._ffmpeg_wav_to_ogg("ffmpeg", wav, out_ogg)
+
+    assert r.returncode == 0
+    assert len(cmds) == 1
+    assert "libvorbis" in cmds[0]
+    assert "experimental" not in cmds[0]
+
+
+def test_ffmpeg_wav_to_ogg_falls_back_on_unknown_libvorbis(tmp_path, monkeypatch):
+    """libvorbis missing → retry with built-in vorbis -strict experimental."""
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"\x00" * 200)
+    out_ogg = tmp_path / "out.ogg"
+    cmds: list = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        _stub_ffmpeg_run(
+            [
+                {"returncode": 1, "stderr": b"Unknown encoder 'libvorbis'\n"},
+                {"returncode": 0, "write_output": True},
+            ],
+            cmds,
+        ),
+    )
+
+    r = sloppak_convert._ffmpeg_wav_to_ogg("ffmpeg", wav, out_ogg)
+
+    assert r.returncode == 0
+    assert len(cmds) == 2
+    assert "libvorbis" in cmds[0]
+    # Retry uses the built-in encoder under -strict experimental.
+    assert "vorbis" in cmds[1]
+    assert "libvorbis" not in cmds[1]
+    assert "experimental" in cmds[1]
+
+
+def test_ffmpeg_wav_to_ogg_does_not_retry_on_unrelated_error(tmp_path, monkeypatch):
+    """If ffmpeg fails for a reason other than missing libvorbis, return the
+    original failure instead of masking it with a built-in retry."""
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"\x00" * 200)
+    out_ogg = tmp_path / "out.ogg"
+    cmds: list = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        _stub_ffmpeg_run(
+            [{"returncode": 1, "stderr": b"No such file or directory\n"}],
+            cmds,
+        ),
+    )
+
+    r = sloppak_convert._ffmpeg_wav_to_ogg("ffmpeg", wav, out_ogg)
+
+    assert r.returncode == 1
+    assert b"No such file or directory" in r.stderr
+    assert len(cmds) == 1  # no retry

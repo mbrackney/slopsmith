@@ -60,16 +60,18 @@ def convert_wem(wem_path: str, output_base: str) -> str:
     Returns path to the converted audio file.
     """
     # Try vgmstream-cli → WAV → MP3 (best browser compatibility)
-    if shutil.which("vgmstream-cli"):
+    vgmstream = _vgmstream_cmd()
+    if vgmstream:
         wav = output_base + ".wav"
         r = subprocess.run(
-            ["vgmstream-cli", "-o", wav, wem_path], capture_output=True
+            [vgmstream, "-o", wav, wem_path], capture_output=True
         )
         if r.returncode == 0 and os.path.exists(wav) and os.path.getsize(wav) > 0:
-            if shutil.which("ffmpeg"):
+            ffmpeg = _ffmpeg_cmd()
+            if ffmpeg:
                 mp3 = output_base + ".mp3"
                 r2 = subprocess.run(
-                    ["ffmpeg", "-y", "-i", wav, "-b:a", "192k", mp3],
+                    [ffmpeg, "-y", "-i", wav, "-b:a", "192k", mp3],
                     capture_output=True,
                 )
                 if r2.returncode == 0 and os.path.exists(mp3):
@@ -78,10 +80,11 @@ def convert_wem(wem_path: str, output_base: str) -> str:
             return wav
 
     # Try ffmpeg directly (some builds handle Wwise)
-    if shutil.which("ffmpeg"):
+    ffmpeg = _ffmpeg_cmd()
+    if ffmpeg:
         mp3 = output_base + ".mp3"
         r = subprocess.run(
-            ["ffmpeg", "-y", "-i", wem_path, "-b:a", "192k", mp3],
+            [ffmpeg, "-y", "-i", wem_path, "-b:a", "192k", mp3],
             capture_output=True,
         )
         if r.returncode == 0 and os.path.exists(mp3) and os.path.getsize(mp3) > 0:
@@ -90,7 +93,7 @@ def convert_wem(wem_path: str, output_base: str) -> str:
         # Try WAV output as fallback
         wav = output_base + ".wav"
         r = subprocess.run(
-            ["ffmpeg", "-y", "-i", wem_path, wav],
+            [ffmpeg, "-y", "-i", wem_path, wav],
             capture_output=True,
         )
         if r.returncode == 0 and os.path.exists(wav) and os.path.getsize(wav) > 0:
