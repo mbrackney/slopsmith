@@ -494,5 +494,6 @@ html { scroll-behavior: smooth; }
   width: 0px;
   background: #ffffff;
   border-radius: 0px;
+  border: 0;
 }
 /* ////// end sliders /////// */
