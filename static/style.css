@@ -462,7 +462,6 @@ html { scroll-behavior: smooth; }
 /* ////// start sliders /////// */
 .slider-input {
   -webkit-appearance: none;
-  width: 100%;
   background: transparent;
   cursor: pointer;
 }

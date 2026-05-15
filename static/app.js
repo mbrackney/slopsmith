@@ -1974,7 +1974,10 @@ function setAvOffsetMs(ms, skipPersist) {
     if (typeof highway !== 'undefined' && highway?.setAvOffset) highway.setAvOffset(_avOffsetMs);
     // Sync any visible Settings slider
     const avSlider = document.getElementById('setting-av-offset');
-    if (avSlider) avSlider.value = _avOffsetMs;
+    if (avSlider) {
+        avSlider.value = _avOffsetMs;
+        handleSliderInput(avSlider);
+    }
     const avVal = document.getElementById('setting-av-offset-val');
     if (avVal) avVal.textContent = Math.round(_avOffsetMs);
     // Sync the inline player-bar slider (live-tunable while playing)
