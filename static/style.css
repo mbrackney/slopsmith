@@ -459,3 +459,41 @@ html { scroll-behavior: smooth; }
     overflow: visible;
     flex-wrap: nowrap;
 }
+/* ////// start sliders /////// */
+.slider-input {
+  -webkit-appearance: none;
+  width: 100%;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* --- Webkit Browsers --- */
+.slider-input::-webkit-slider-runnable-track {
+  height: 26px;
+  background: linear-gradient(to right, rgb(var(--sm-accent)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  border-radius: 8px;
+}
+
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 0px;
+  width: 0px;
+  background: #ffffff;
+  border-radius: 0px;
+  margin-top: 9px;
+}
+
+/* --- Firefox --- */
+.slider-input::-moz-range-track {
+  height: 26px;
+  background: linear-gradient(to right, rgb(var(--sm-accent)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  border-radius: 8px;
+}
+
+.slider-input::-moz-range-thumb {
+  height: 0px;
+  width: 0px;
+  background: #ffffff;
+  border-radius: 0px;
+}
+/* ////// end sliders /////// */

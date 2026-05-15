@@ -1924,7 +1924,10 @@ async function loadSettings() {
         : 100;
     const masterySlider = document.getElementById('mastery-slider');
     const masteryLabel = document.getElementById('mastery-label');
-    if (masterySlider) masterySlider.value = masteryPct;
+    if (masterySlider) {
+        masterySlider.value = masteryPct;
+        handleSliderInput(masterySlider);
+    }
     if (masteryLabel) masteryLabel.textContent = masteryPct + '%';
     highway.setMastery(masteryPct / 100);
     // Route the loaded value through setAvOffsetMs so the highway's
@@ -1939,6 +1942,14 @@ async function loadSettings() {
         document.getElementById('btn-pick-dlc')?.classList.remove('hidden');
     }
 }
+
+// Updates the fill on slider elements. Expects a CSS variable --range-pct used in the track fill styling.
+const handleSliderInput = (el) => {
+    const min = el.min || 0;
+    const max = el.max || 100;
+    const pct = (el.value - min) / (max - min) * 100;
+    el.style.setProperty('--range-pct', pct + '%');
+};
 
 // A/V sync calibration. Positive = audio runs ahead of visuals; we
 // add this to audio.currentTime when driving the highway so the
@@ -1968,7 +1979,10 @@ function setAvOffsetMs(ms, skipPersist) {
     if (avVal) avVal.textContent = Math.round(_avOffsetMs);
     // Sync the inline player-bar slider (live-tunable while playing)
     const playerAvSlider = document.getElementById('player-av-offset-slider');
-    if (playerAvSlider) playerAvSlider.value = _avOffsetMs;
+    if (playerAvSlider) {
+        playerAvSlider.value = _avOffsetMs;
+        handleSliderInput(playerAvSlider);
+    }
     const playerAvLabel = document.getElementById('player-av-offset-label');
     if (playerAvLabel) {
         const rounded = Math.round(_avOffsetMs);
@@ -3296,6 +3310,7 @@ async function playSong(filename, arrangement) {
     isPlaying = false;
     document.getElementById('btn-play').textContent = '▶ Play';
     document.getElementById('speed-slider').value = 100;
+    handleSliderInput(document.getElementById('speed-slider'));
     document.getElementById('speed-label').textContent = '1.0x';
     clearLoop();
 
@@ -3419,14 +3434,17 @@ async function seekBy(s) {
     await _audioSeek(Math.max(0, _audioTime() + s), 'seek-by');
 }
 function setSpeed(v) {
+    const speedSlider = document.getElementById('speed-slider');
     if (window._juceMode) {
         audio.playbackRate = 1.0;
-        document.getElementById('speed-slider').value = 100;
+        speedSlider.value = 100;
         document.getElementById('speed-label').textContent = '1.0x';
+        handleSliderInput(speedSlider);
         return;
     }
     audio.playbackRate = parseFloat(v);
     document.getElementById('speed-label').textContent = parseFloat(v).toFixed(2) + 'x';
+    handleSliderInput(speedSlider);
 }
 // Master-difficulty slider (slopsmith#48). Persists partial via
 // /api/settings — the POST handler merges only the keys present, so
@@ -3456,6 +3474,7 @@ function setMastery(v) {
     if (!Number.isFinite(parsed)) return;
     const pct = Math.max(0, Math.min(100, parsed));
     document.getElementById('mastery-label').textContent = pct + '%';
+    handleSliderInput(document.getElementById('mastery-slider'));
     highway.setMastery(pct / 100);
     _persistMastery(pct);
 }
