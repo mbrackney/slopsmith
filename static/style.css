@@ -430,7 +430,7 @@ html { scroll-behavior: smooth; }
 #mixer-popover .mixer-strip-fader {
     width: 110px;
     height: 24px;
-    margin: 0;
+    margin: 55px 0 0 0; /* Push the fader down so the track is centered under the label text*/
     padding: 0;
     vertical-align: middle;
     transform: rotate(-90deg);
@@ -440,7 +440,7 @@ html { scroll-behavior: smooth; }
     cursor: pointer;
 }
 #mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
-  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-900, 10, 10, 18)) var(--range-pct, 0%));
   border-radius: 8px;
 }
 #mixer-popover .mixer-strip-fader::-webkit-slider-thumb {
@@ -452,6 +452,26 @@ html { scroll-behavior: smooth; }
   margin-top: 9px;
   opacity: 0;
 }
+/* --- Firefox --- */
+#mixer-popover .mixer-strip-fader::-moz-range-track {
+  height: 16px;
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-900, 10, 10, 18)) var(--range-pct, 0%));
+  border-radius: 8px;
+}
+
+#mixer-popover .mixer-strip-fader::-moz-range-thumb {
+  height: 0px;
+  width: 0px;
+  background: #ffffff;
+  border-radius: 0px;
+  border: 0;
+}
+#mixer-popover .mixer-strip-value { 
+    font-size: 10px;
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;
+    margin-top: 55px;
+}
 @supports ((-webkit-appearance: slider-vertical) or (appearance: slider-vertical)) {
     #mixer-popover .mixer-strip-fader {
         width: 24px;
@@ -462,13 +482,16 @@ html { scroll-behavior: smooth; }
         direction: rtl;
         -webkit-appearance: slider-vertical;
         appearance: slider-vertical;
+        margin: 0;
     }
     #mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
-        background: linear-gradient(to top, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+        background: linear-gradient(to top, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-900, 10, 10, 18)) var(--range-pct, 0%));
         border-radius: 8px;
     }
+    #mixer-popover .mixer-strip-value { 
+        margin-top: 0;
+    }
 }
-#mixer-popover .mixer-strip-value { font-size: 10px; color: #6b7280; font-variant-numeric: tabular-nums; }
 #mixer-popover .mixer-row {
     display: flex;
     justify-content: center;
@@ -478,6 +501,7 @@ html { scroll-behavior: smooth; }
     width: max-content;
     overflow: visible;
     flex-wrap: nowrap;
+    min-height: 134px; /* Fix for incorrect height in firefox */
 }
 /* ////// start sliders /////// */
 .slider-input {
@@ -489,7 +513,7 @@ html { scroll-behavior: smooth; }
 /* --- Webkit Browsers --- */
 .slider-input::-webkit-slider-runnable-track {
   height: 26px;
-  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-600, 35, 35, 50)) var(--range-pct, 0%));
   border-radius: 8px;
 }
 
@@ -505,7 +529,7 @@ html { scroll-behavior: smooth; }
 /* --- Firefox --- */
 .slider-input::-moz-range-track {
   height: 26px;
-  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-600, 35, 35, 50)) var(--range-pct, 0%));
   border-radius: 8px;
 }
 
