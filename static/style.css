@@ -469,7 +469,7 @@ html { scroll-behavior: smooth; }
 /* --- Webkit Browsers --- */
 .slider-input::-webkit-slider-runnable-track {
   height: 26px;
-  background: linear-gradient(to right, rgb(var(--sm-accent)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
   border-radius: 8px;
 }
 
@@ -485,7 +485,7 @@ html { scroll-behavior: smooth; }
 /* --- Firefox --- */
 .slider-input::-moz-range-track {
   height: 26px;
-  background: linear-gradient(to right, rgb(var(--sm-accent)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
   border-radius: 8px;
 }
 
