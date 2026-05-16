@@ -430,7 +430,7 @@ html { scroll-behavior: smooth; }
 #mixer-popover .mixer-strip-fader {
     width: 110px;
     height: 24px;
-    margin: 55px 0 0 0; /* Push the fader down so the track is centered under the label text*/
+    margin: 55px 0 0 0; /* Push the fader down so the track is centered under the label text */
     padding: 0;
     vertical-align: middle;
     transform: rotate(-90deg);
