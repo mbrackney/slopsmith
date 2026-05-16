@@ -435,6 +435,22 @@ html { scroll-behavior: smooth; }
     vertical-align: middle;
     transform: rotate(-90deg);
     transform-origin: center;
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+}
+#mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+  border-radius: 8px;
+}
+#mixer-popover .mixer-strip-fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 0px;
+  width: 0px;
+  background: #ffffff;
+  border-radius: 0px;
+  margin-top: 9px;
+  opacity: 0;
 }
 @supports ((-webkit-appearance: slider-vertical) or (appearance: slider-vertical)) {
     #mixer-popover .mixer-strip-fader {
@@ -446,6 +462,10 @@ html { scroll-behavior: smooth; }
         direction: rtl;
         -webkit-appearance: slider-vertical;
         appearance: slider-vertical;
+    }
+    #mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
+        background: linear-gradient(to top, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(35, 35, 50) var(--range-pct, 0%));
+        border-radius: 8px;
     }
 }
 #mixer-popover .mixer-strip-value { font-size: 10px; color: #6b7280; font-variant-numeric: tabular-nums; }
