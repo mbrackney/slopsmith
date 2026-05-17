@@ -34,6 +34,14 @@ html { scroll-behavior: smooth; }
    Folds in the fix from byrongamatos/slopsmith#99. */
 #player-controls { position: relative; z-index: 10; }
 
+.button-icon-svg {
+    width: 14px;
+    height: 14px;
+    fill: white;
+    vertical-align: middle;
+    display: inline-block;
+}
+
 /* Song cards */
 .song-card {
     background: linear-gradient(145deg, #10101e 0%, #0d0d18 100%);

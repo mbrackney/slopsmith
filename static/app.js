@@ -917,7 +917,7 @@ async function showScreen(id) {
         audio.pause();
         audio.src = '';
         isPlaying = false;
-        document.getElementById('btn-play').textContent = '▶ Play';
+        document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
     }
     window.scrollTo(0, 0);
     if (window.slopsmith) window.slopsmith.emit('screen:changed', { id });
@@ -2942,7 +2942,7 @@ let _resetJuceAudioShimChain = function () {};
                     await jucePlayer.pause();
                     if (gen !== _juceShimGen) return;
                     isPlaying = false;
-                    document.getElementById('btn-play').textContent = '▶ Play';
+                    document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
                     const sm = window.slopsmith;
                     if (sm) {
                         sm.isPlaying = false;
@@ -2958,7 +2958,7 @@ let _resetJuceAudioShimChain = function () {};
                 await jucePlayer.pause();
                 if (gen !== _juceShimGen) return;
                 isPlaying = false;
-                document.getElementById('btn-play').textContent = '▶ Play';
+                document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
                 const sm = window.slopsmith;
                 if (sm) {
                     sm.isPlaying = false;
@@ -3038,7 +3038,7 @@ let _resetJuceAudioShimChain = function () {};
                 const started = await jucePlayer.play();
                 if (gen !== _juceShimGen || !started) return;
                 isPlaying = true;
-                document.getElementById('btn-play').textContent = '⏸ Pause';
+                document.getElementById('btn-play').innerHTML = '<img src="/static/svg/pause.svg" class="button-icon-svg" alt="Pause" aria-label="Pause" />';
                 const sm = window.slopsmith;
                 if (sm) {
                     sm.isPlaying = true;
@@ -3238,7 +3238,7 @@ audio.addEventListener('stalled', () => console.log('Audio stalled at', audio.cu
 audio.addEventListener('waiting', () => console.log('Audio waiting/buffering at', audio.currentTime.toFixed(1)));
 audio.addEventListener('ended', () => {
     console.log('Audio ended'); isPlaying = false;
-    document.getElementById('btn-play').textContent = '▶ Play';
+    document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
     window.slopsmith.isPlaying = false;
     window.slopsmith.emit('song:ended', _songEventPayload());
 });
@@ -3294,7 +3294,7 @@ async function playSong(filename, arrangement) {
     audio.pause();
     audio.src = '';
     isPlaying = false;
-    document.getElementById('btn-play').textContent = '▶ Play';
+    document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
     document.getElementById('speed-slider').value = 100;
     document.getElementById('speed-label').textContent = '1.0x';
     clearLoop();
@@ -3361,7 +3361,7 @@ async function changeArrangement(index) {
                 // sm.isPlaying = false, emit song:pause so plugins see the
                 // paused state.
                 if (wasPlaying) {
-                    document.getElementById('btn-play').textContent = '▶ Play';
+                    document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
                     if (window.slopsmith) {
                         window.slopsmith.isPlaying = false;
                         window.slopsmith.emit('song:pause', _songEventPayload());
@@ -3393,14 +3393,14 @@ async function togglePlay() {
         if (isPlaying) {
             await jucePlayer.pause();
             isPlaying = false;
-            document.getElementById('btn-play').textContent = '▶ Play';
+            document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
             window.slopsmith.isPlaying = false;
             window.slopsmith.emit('song:pause', _songEventPayload());
         } else {
             const started = await jucePlayer.play();
             if (!started) return; // startBacking() failed — IPC error already logged
             isPlaying = true;
-            document.getElementById('btn-play').textContent = '⏸ Pause';
+            document.getElementById('btn-play').innerHTML = '<img src="/static/svg/pause.svg" class="button-icon-svg" alt="Pause" aria-label="Pause" />';
             window.slopsmith.isPlaying = true;
             window.slopsmith.emit('song:play', _songEventPayload());
         }
@@ -3408,10 +3408,10 @@ async function togglePlay() {
     }
     if (isPlaying) {
         audio.pause(); isPlaying = false;
-        document.getElementById('btn-play').textContent = '▶ Play';
+        document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
     } else {
         audio.play(); isPlaying = true;
-        document.getElementById('btn-play').textContent = '⏸ Pause';
+        document.getElementById('btn-play').innerHTML = '<img src="/static/svg/pause.svg" class="button-icon-svg" alt="Pause" aria-label="Pause" />';
     }
 }
 
@@ -4274,7 +4274,7 @@ async function startCountIn() {
                     _countingIn = false;
                     if (isPlaying) {
                         isPlaying = false;
-                        document.getElementById('btn-play').textContent = '▶ Play';
+                        document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
                         if (window.slopsmith) {
                             window.slopsmith.isPlaying = false;
                             window.slopsmith.emit('song:pause', _songEventPayload());
@@ -4313,14 +4313,14 @@ async function startCountIn() {
                         if (gen !== _countInGen) return; // teardown during play start
                         if (!started) return;
                         isPlaying = true;
-                        document.getElementById('btn-play').textContent = '⏸ Pause';
+                        document.getElementById('btn-play').innerHTML = '<img src="/static/svg/pause.svg" class="button-icon-svg" alt="Pause" aria-label="Pause" />';
                         window.slopsmith.isPlaying = true;
                         window.slopsmith.emit('song:play', _songEventPayload());
                     }).catch((err) => console.error('[app] jucePlayer.play error:', err));
                 } else {
                     audio.play();
                     isPlaying = true;
-                    document.getElementById('btn-play').textContent = '⏸ Pause';
+                    document.getElementById('btn-play').innerHTML = '<img src="/static/svg/pause.svg" class="button-icon-svg" alt="Pause" aria-label="Pause" />';
                 }
                 return;
             }
@@ -4341,7 +4341,7 @@ setInterval(() => {
         // JUCE end-of-track: HTML5 fires 'ended'; JUCE needs a manual check
         if (window._juceMode && isPlaying && ct >= dur) {
             isPlaying = false;
-            document.getElementById('btn-play').textContent = '▶ Play';
+            document.getElementById('btn-play').innerHTML = '<img src="/static/svg/play.svg" class="button-icon-svg" alt="Play" aria-label="Play" />';
             window.slopsmith.isPlaying = false;
             window.slopsmith.emit('song:ended', _songEventPayload());
             jucePlayer.pause().catch((err) => console.warn('[app] end-of-track pause error:', err));
