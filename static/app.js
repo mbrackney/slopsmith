@@ -1037,7 +1037,6 @@ function _resetLibraryProviderViewState() {
     _treePage = 0;
     _treeStats = null;
     _tuningNames = null;
-    _resetLibraryPageFetchProgress();
     stopInfiniteScroll();
 }
 
@@ -1167,7 +1166,6 @@ let _debounceTimer = null;
 let _loadingMore = false;
 let _hasMore = true;
 let _gridObserver = null;
-let _gridFetchProgress = { queryKey: '', fetched: 0, total: null, page: 0, loading: false };
 // Bumped on filter/sort/view changes so in-flight page fetches can detect
 // they've been superseded and skip rendering stale results.
 let _libEpoch = 0;
@@ -1567,84 +1565,6 @@ function _libraryLoadingText() {
     return `Connecting to ${provider.label || provider.id}...`;
 }
 
-function _isActiveLibraryRemoteSource() {
-    const provider = _activeLibraryProvider();
-    return !!provider && provider.id !== 'local' && provider.kind === 'remote';
-}
-
-function _resetLibraryPageFetchProgress() {
-    _gridFetchProgress = { queryKey: '', fetched: 0, total: null, page: 0, loading: false };
-}
-
-function _libraryGridQueryKey(params) {
-    return Array.from(params.entries())
-        .filter(([key]) => key !== 'page')
-        .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
-            leftKey.localeCompare(rightKey) || String(leftValue).localeCompare(String(rightValue))
-        )
-        .map(([key, value]) => `${key}=${value}`)
-        .join('&');
-}
-
-function _renderLibraryPageFetchProgress() {
-    if (!_isActiveLibraryRemoteSource()) return;
-    const count = document.getElementById('lib-count');
-    if (!count) return;
-    const provider = _activeLibraryProvider();
-    const label = provider.label || provider.id || 'source';
-    const total = Number.isFinite(_gridFetchProgress.total) ? _gridFetchProgress.total : null;
-    const fetched = Math.max(0, _gridFetchProgress.fetched || 0);
-    if (_gridFetchProgress.loading) {
-        if (total !== null) {
-            count.textContent = `Fetching page ${_gridFetchProgress.page + 1} from ${label} · ${fetched} of ${total} songs fetched`;
-        } else {
-            count.textContent = `Fetching page ${_gridFetchProgress.page + 1} from ${label}...`;
-        }
-        return;
-    }
-    if (total !== null) {
-        count.textContent = fetched > 0 && fetched < total ? `${fetched} of ${total} songs fetched` : `${total} songs`;
-    }
-}
-
-function _beginLibraryPageFetch(queryKey, page) {
-    if (!_isActiveLibraryRemoteSource()) return;
-    if (_gridFetchProgress.queryKey !== queryKey) {
-        _gridFetchProgress = { queryKey, fetched: 0, total: null, page, loading: true };
-    } else {
-        _gridFetchProgress.page = page;
-        _gridFetchProgress.loading = true;
-    }
-    _renderLibraryPageFetchProgress();
-}
-
-function _finishLibraryPageFetch(queryKey, page, songs, total, pageSize) {
-    if (!_isActiveLibraryRemoteSource() || _gridFetchProgress.queryKey !== queryKey) return;
-    const totalSongs = Math.max(0, Number(total) || 0);
-    const fetched = Math.min(totalSongs, Math.max(0, page) * Math.max(1, pageSize || PAGE_SIZE) + (songs || []).length);
-    _gridFetchProgress = { queryKey, fetched, total: totalSongs, page, loading: false };
-    _renderLibraryPageFetchProgress();
-}
-
-function _failLibraryPageFetch(queryKey) {
-    if (_gridFetchProgress.queryKey === queryKey) _gridFetchProgress.loading = false;
-}
-
-function _setTreePageFetchProgress(countId, page, totalArtists, favoritesOnly) {
-    if (favoritesOnly || !_isActiveLibraryRemoteSource()) return;
-    const count = document.getElementById(countId);
-    if (!count) return;
-    const provider = _activeLibraryProvider();
-    const label = provider.label || provider.id || 'source';
-    const total = Math.max(0, Number(totalArtists) || 0);
-    if (total) {
-        const fetched = Math.min(total, Math.max(0, page) * TREE_PAGE_SIZE);
-        count.textContent = `Fetching artists page ${page + 1} from ${label} · ${fetched} of ${total} artists fetched`;
-    } else {
-        count.textContent = `Fetching artists from ${label}...`;
-    }
-}
-
 function filterLibrary() {
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(() => {
@@ -1692,17 +1612,14 @@ async function loadGridPage(page = 0) {
     if (format) params.set('format', format);
     _applyLibraryProviderToParams(params);
     _applyLibFiltersToParams(params);
-    const queryKey = _libraryGridQueryKey(params);
     if (page === 0) {
         _setLibraryLoadingMessage('lib-grid', 'lib-count', _libraryLoadingText());
     }
-    _beginLibraryPageFetch(queryKey, page);
     let data;
     try {
         data = await _fetchJsonOrThrow(`/api/library?${params}`);
     } catch (error) {
         if (myEpoch !== _libEpoch) return;
-        _failLibraryPageFetch(queryKey);
         currentPage = 0;
         _hasMore = false;
         stopInfiniteScroll();
@@ -1714,11 +1631,7 @@ async function loadGridPage(page = 0) {
     currentPage = page;
     const total = data.total || 0;
     const songs = data.songs || [];
-    if (_isActiveLibraryRemoteSource()) {
-        _finishLibraryPageFetch(queryKey, page, songs, total, data.size || PAGE_SIZE);
-    } else {
-        document.getElementById('lib-count').textContent = `${total} songs`;
-    }
+    document.getElementById('lib-count').textContent = `${total} songs`;
 
     renderGridCards(songs, 'lib-grid', page === 0 ? 'replace' : 'append');
 
@@ -1939,7 +1852,6 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
     if (!favoritesOnly) _applyLibFiltersToParams(params);
     params.set('page', page);
     params.set('size', TREE_PAGE_SIZE);
-    _setTreePageFetchProgress(countId, page, stats.total_artists, favoritesOnly);
     let data;
     try {
         data = await _fetchJsonOrThrow(`/api/library/artists?${params}`);

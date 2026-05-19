@@ -676,8 +676,11 @@ class MetadataDB:
         ).fetchall()
         letters = {}
         for letter, count in rows:
-            if letter and letter.isalpha():
-                letters[letter] = count
+            count = int(count or 0)
+            if count <= 0:
+                continue
+            if letter and str(letter).isalpha():
+                letters[str(letter)] = letters.get(str(letter), 0) + count
             else:
                 letters["#"] = letters.get("#", 0) + count
         return {"total_songs": total, "total_artists": artist_count, "letters": letters}
