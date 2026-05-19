@@ -123,6 +123,12 @@ class ReadOnlyLibraryProvider:
     def tuning_names(self):
         return {"tunings": []}
 
+    def get_art(self, song_id: str):
+        raise AssertionError("provider without art.read capability should not be dispatched")
+
+    def sync_song(self, song_id: str):
+        raise AssertionError("provider without song.sync capability should not be dispatched")
+
 
 def test_registered_provider_handles_library_endpoints(tmp_path, monkeypatch):
     server = _import_server(tmp_path, monkeypatch)
@@ -215,11 +221,11 @@ def test_provider_art_and_sync_report_unsupported_when_missing(tmp_path, monkeyp
     with TestClient(server.app) as client:
         art = client.get("/api/library/providers/remote:readonly/songs/remote-song-id/art")
         assert art.status_code == 501
-        assert "does not support get_art" in art.json()["detail"]
+        assert "does not declare capability 'art.read'" in art.json()["detail"]
 
         synced = client.post("/api/library/providers/remote:readonly/songs/remote-song-id/sync")
         assert synced.status_code == 501
-        assert "does not support sync_song" in synced.json()["detail"]
+        assert "does not declare capability 'song.sync'" in synced.json()["detail"]
 
     _close(server)
 

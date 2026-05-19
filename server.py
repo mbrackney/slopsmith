@@ -835,6 +835,16 @@ def _get_library_provider(provider: str = "local") -> object:
     return library_provider
 
 
+def _require_library_provider_capability(provider: object, capability: str) -> None:
+    if capability in library_providers.provider_capabilities(provider):
+        return
+    provider_id = library_providers.provider_id(provider)
+    raise HTTPException(
+        status_code=501,
+        detail=f"Library provider {provider_id!r} does not declare capability {capability!r}",
+    )
+
+
 def _call_library_provider(provider: object, method_name: str, **kwargs) -> Any:
     method = library_providers.provider_method(provider, method_name)
     if not callable(method):
@@ -2457,6 +2467,7 @@ def list_library_providers():
 async def get_library_provider_song_art(provider_id: str, song_id: str):
     """Return album art for a song owned by a library provider."""
     library_provider = _get_library_provider(provider_id)
+    _require_library_provider_capability(library_provider, "art.read")
     result = await _call_library_provider_async(library_provider, "get_art", song_id=song_id)
     return _library_art_response(result)
 
@@ -2465,6 +2476,7 @@ async def get_library_provider_song_art(provider_id: str, song_id: str):
 async def sync_library_provider_song(provider_id: str, song_id: str):
     """Ask a provider to sync a remote song into the local library/cache."""
     library_provider = _get_library_provider(provider_id)
+    _require_library_provider_capability(library_provider, "song.sync")
     result = await _call_library_provider_async(library_provider, "sync_song", song_id=song_id)
     if result is None:
         return {"ok": True}

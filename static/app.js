@@ -1025,6 +1025,10 @@ function _providerSupports(providerId, capability) {
     return !!provider && Array.isArray(provider.capabilities) && provider.capabilities.includes(capability);
 }
 
+function _isBrowsableLibraryProvider(provider) {
+    return !!provider && Array.isArray(provider.capabilities) && provider.capabilities.includes('library.read');
+}
+
 function _applyLibraryProviderToParams(params) {
     params.set('provider', _activeLibraryProviderId());
     return params;
@@ -1059,7 +1063,7 @@ async function loadLibraryProviders({ restoreSaved = false, reloadOnChange = fal
         const response = await fetch('/api/library/providers');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        const providers = Array.isArray(data.providers) ? data.providers : [];
+        const providers = (Array.isArray(data.providers) ? data.providers : []).filter(_isBrowsableLibraryProvider);
         const hasLocal = providers.some(provider => provider && provider.id === 'local');
         _libraryProviders = hasLocal
             ? providers
@@ -1125,7 +1129,7 @@ function _librarySongTitle(song, providerId) {
 
 function _librarySongArtUrl(song, providerId) {
     const explicitArt = song.art_url || song.artUrl || song.cover_url || song.coverUrl;
-    if (explicitArt) return explicitArt;
+    if (explicitArt) return _safeImageUrl(explicitArt);
     const version = song.mtime ? `?v=${Math.floor(song.mtime)}` : '';
     const localFilename = _libraryLocalFilename(song, providerId);
     if (localFilename) return `/api/song/${encodeURIComponent(localFilename)}/art${version}`;
@@ -1133,8 +1137,20 @@ function _librarySongArtUrl(song, providerId) {
         const filename = localFilename;
         return filename ? `/api/song/${encodeURIComponent(filename)}/art${version}` : '';
     }
+    if (!_providerSupports(providerId, 'art.read')) return '';
     const songId = _librarySongId(song);
     return songId ? `/api/library/providers/${encodeURIComponent(providerId)}/songs/${encodeURIComponent(songId)}/art${version}` : '';
+}
+
+function _safeImageUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+    } catch {
+        return '';
+    }
 }
 
 const _librarySyncStates = new Map();
@@ -1553,17 +1569,19 @@ async function _fetchJsonOrThrow(url) {
     const resp = await fetch(url);
     const raw = await resp.text();
     let data = {};
+    let parseError = null;
     if (raw) {
         try {
             data = JSON.parse(raw);
-        } catch {
-            data = {};
+        } catch (error) {
+            parseError = error;
         }
     }
     if (!resp.ok) {
         const detail = String(data.detail || data.error || data.message || '').trim();
         throw new Error(detail || `HTTP ${resp.status}`);
     }
+    if (parseError) throw new Error('Malformed JSON response');
     return data;
 }
 
@@ -1753,7 +1771,7 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
         const ariaAction = localFilename ? 'Play' : 'Load and play';
         const ariaLabel = `${ariaAction} ${title || _libraryDisplayFilename(song, providerId)}${artist ? ' by ' + artist : ''}`;
         const artHtml = artUrl
-            ? `<img src="${artUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            ? `<img src="${_escAttr(artUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                 <span class="placeholder" style="display:none">🎸</span>`
             : `<span class="placeholder" style="display:flex">🎸</span>`;
         return `<div class="song-card group" ${entryAttrs} data-artist="${_escAttr(artist || '')}" tabindex="0" role="button" aria-label="${_escAttr(ariaLabel)}">
@@ -1820,6 +1838,7 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
 // ── Tree View (server-side) ─────────────────────────────────────────────
 
 async function loadTreeView() {
+    const myEpoch = _libEpoch;
     if (!_treeStats) {
         _setLibraryLoadingMessage('lib-tree', 'lib-count', _libraryLoadingText());
         const q = document.getElementById('lib-filter').value.trim();
@@ -1833,19 +1852,21 @@ async function loadTreeView() {
         try {
             _treeStats = await _fetchJsonOrThrow(`/api/library/stats${qs ? '?' + qs : ''}`);
         } catch (error) {
+            if (myEpoch !== _libEpoch) return;
             _treeStats = null;
             _setLibraryOfflineMessage('lib-tree', 'lib-count', error.message || 'This source appears to be offline.');
             return;
         }
+        if (myEpoch !== _libEpoch) return;
     }
     const q = document.getElementById('lib-filter').value.trim();
-    await renderTreeInto('lib-tree', 'lib-count', _treeStats, _treeLetter, q, false);
+    await renderTreeInto('lib-tree', 'lib-count', _treeStats, _treeLetter, q, false, undefined, myEpoch);
 }
 
 let _treePage = 0;
 const TREE_PAGE_SIZE = 50;
 
-async function renderTreeInto(containerId, countId, stats, letter, q, favoritesOnly, page) {
+async function renderTreeInto(containerId, countId, stats, letter, q, favoritesOnly, page, expectedEpoch = _libEpoch) {
     if (page === undefined) page = favoritesOnly ? _favTreePage || 0 : _treePage;
     const container = document.getElementById(containerId);
     const screenProviderId = favoritesOnly ? 'local' : _activeLibraryProviderId();
@@ -1884,9 +1905,11 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
     try {
         data = await _fetchJsonOrThrow(`/api/library/artists?${params}`);
     } catch (error) {
+        if (expectedEpoch !== _libEpoch) return;
         _setLibraryOfflineMessage(containerId, countId, error.message || 'This source appears to be offline.');
         return;
     }
+    if (expectedEpoch !== _libEpoch) return;
     const artists = data.artists || [];
     const totalArtists = data.total_artists || 0;
     const totalPages = Math.ceil(totalArtists / TREE_PAGE_SIZE);
@@ -1933,7 +1956,7 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
             html += `<div class="album-group${albumOpen}">`;
             html += `<div class="album-header" tabindex="0" role="button" aria-expanded="${albumIsOpen ? 'true' : 'false'}" aria-label="${albumAria}" onclick="_onHeaderClick(this)">`;
             html += chevron;
-            if (artUrl) html += `<img src="${artUrl}" alt="" class="album-art-sm" loading="lazy" onerror="this.style.display='none'">`;
+            if (artUrl) html += `<img src="${_escAttr(artUrl)}" alt="" class="album-art-sm" loading="lazy" onerror="this.style.display='none'">`;
             html += `<span class="text-gray-300 text-sm flex-1">${esc(album.name)}</span>`;
             html += `<span class="text-xs text-gray-600">${albumSongs.length}</span>`;
             html += `</div><div class="album-body">`;
@@ -5768,7 +5791,7 @@ async function syncLibrarySong(providerId, songId, { playWhenReady = false } = {
     if (!providerId || !songId) return;
     const currentState = _librarySyncState(providerId, songId);
     if (currentState && currentState.status === 'synced' && currentState.localFilename) {
-        if (playWhenReady) playSong(currentState.localFilename);
+        if (playWhenReady) playSong(encodeURIComponent(currentState.localFilename));
         return currentState.result || { filename: currentState.localFilename };
     }
     if (currentState && currentState.status === 'syncing') return null;
@@ -5790,7 +5813,7 @@ async function syncLibrarySong(providerId, songId, { playWhenReady = false } = {
         _favTreeStats = null;
         _tuningNames = null;
         await loadLibrary(0);
-        if (playWhenReady && localFilename) playSong(localFilename);
+        if (playWhenReady && localFilename) playSong(encodeURIComponent(localFilename));
         return data;
     } catch (error) {
         _setLibrarySyncState(providerId, songId, { status: 'error', message: error.message || 'Unknown error' });
