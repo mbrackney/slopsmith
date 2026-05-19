@@ -384,7 +384,6 @@ function _handleLibArrowNav(e) {
                 syncLibrarySong(
                     providerId,
                     decodeURIComponent(currentTarget.dataset.librarySong || ''),
-                    currentTarget.querySelector('.library-sync-btn'),
                     { playWhenReady: true },
                 );
                 return true;
@@ -1110,7 +1109,9 @@ function _libraryLocalFilename(song, providerId) {
     if (_isLocalLibraryProvider(providerId)) return song.filename ? String(song.filename) : '';
     const filename = song.local_filename || song.localFilename || song.synced_filename ||
         song.syncedFilename || song.play_filename || song.playFilename || '';
-    return String(filename || '');
+    if (filename) return String(filename);
+    const state = _librarySyncState(providerId, _librarySongId(song));
+    return state && state.status === 'synced' && state.localFilename ? String(state.localFilename) : '';
 }
 
 function _libraryDisplayFilename(song, providerId) {
@@ -1146,19 +1147,11 @@ function _librarySyncState(providerId, songId) {
     return _librarySyncStates.get(_librarySyncKey(providerId, songId)) || null;
 }
 
-function _librarySyncText(state) {
-    if (!state) return 'Sync';
-    if (state.status === 'syncing') return 'Syncing...';
-    if (state.status === 'synced') return 'Synced';
-    if (state.status === 'error') return 'Retry';
-    return 'Sync';
-}
-
 function _librarySyncStatusText(state) {
     if (!state) return '';
-    if (state.status === 'syncing') return 'Downloading package...';
-    if (state.status === 'synced') return state.message || 'Synced to local cache';
-    if (state.status === 'error') return state.message ? `Sync failed: ${state.message}` : 'Sync failed';
+    if (state.status === 'syncing') return 'Loading package...';
+    if (state.status === 'synced') return state.message || 'Ready to play';
+    if (state.status === 'error') return state.message ? `Load failed: ${state.message}` : 'Load failed';
     return '';
 }
 
@@ -1175,15 +1168,6 @@ function _librarySyncStatusClass(state, layout) {
 function _librarySyncStatusMarkup(providerId, songId, layout = 'block') {
     const state = _librarySyncState(providerId, songId);
     return `<span data-library-sync-status role="status" aria-live="polite" data-library-sync-provider="${encodeURIComponent(providerId)}" data-library-sync-song="${encodeURIComponent(songId)}" class="${_librarySyncStatusClass(state, layout)}">${esc(_librarySyncStatusText(state))}</span>`;
-}
-
-function _librarySyncButton(providerId, songId, extraClass = '') {
-    if (_isLocalLibraryProvider(providerId) || !_providerSupports(providerId, 'song.sync') || !songId) return '';
-    const state = _librarySyncState(providerId, songId);
-    const disabled = state && (state.status === 'syncing' || state.status === 'synced');
-    const busy = state && state.status === 'syncing';
-    return `<button data-library-sync-provider="${encodeURIComponent(providerId)}" data-library-sync-song="${encodeURIComponent(songId)}"
-        class="library-sync-btn ${extraClass} bg-accent/15 hover:bg-accent/25 disabled:hover:bg-accent/15 disabled:opacity-70 border border-accent/30 rounded-lg text-xs font-medium text-accent-light transition" ${disabled ? 'disabled' : ''} ${busy ? 'aria-busy="true"' : ''}>${esc(_librarySyncText(state))}</button>`;
 }
 
 let libView = _readPersistedChoice(_LIB_VIEW_KEY, _LIB_VIEW_VALUES, 'grid');
@@ -1758,7 +1742,6 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
                 ⬆ Convert to E Standard</button>`
             : '';
         const fmtBadge = formatBadge(song.format, song.stem_count);
-        const syncBtn = !localFilename ? _librarySyncButton(providerId, songId, 'mt-2 w-full px-2 py-1.5') : '';
         const syncStatus = !localFilename ? _librarySyncStatusMarkup(providerId, songId) : '';
         const actionButtons = isLocalProvider && localFilename
             ? `${editBtn(song)}${heartBtn(localFilename, song.favorite)}`
@@ -1767,7 +1750,7 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
         const entryAttrs = localFilename
             ? `data-play="${encodeURIComponent(localFilename)}" ${providerAttr}`
             : `data-library-provider="${encodeURIComponent(providerId)}" data-library-song="${encodeURIComponent(songId)}"`;
-        const ariaAction = localFilename ? 'Play' : 'Sync';
+        const ariaAction = localFilename ? 'Play' : 'Load and play';
         const ariaLabel = `${ariaAction} ${title || _libraryDisplayFilename(song, providerId)}${artist ? ' by ' + artist : ''}`;
         const artHtml = artUrl
             ? `<img src="${artUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -1802,7 +1785,6 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
                     ${duration ? `<span class="text-gray-600">${duration}</span>` : ''}
                 </div>
                 ${retuneBtn}
-                ${syncBtn}
                 ${syncStatus}
             </div>
         </div>`;
@@ -1971,7 +1953,7 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
                 const rowAttrs = localFilename
                     ? `data-play="${encodeURIComponent(localFilename)}" ${providerAttr}`
                     : `data-library-provider="${encodeURIComponent(providerId)}" data-library-song="${encodeURIComponent(songId)}"`;
-                const ariaAction = localFilename ? 'Play' : 'Sync';
+                const ariaAction = localFilename ? 'Play' : 'Load and play';
                 const rowAria = _escAttr(`${ariaAction} ${title}${artist.name ? ' by ' + artist.name : ''}`);
                 html += `<div class="song-row" ${rowAttrs} data-artist="${_escAttr(artist.name || '')}" tabindex="0" role="button" aria-label="${rowAria}">`;
                 html += `<div class="flex-1 min-w-0 flex items-center gap-2"><span class="text-sm text-white truncate block">${esc(title)}</span>${formatBadgeInline(song.format, song.stem_count)}</div>`;
@@ -1996,7 +1978,6 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
                     html += editBtn(song);
                     html += heartBtn(localFilename, song.favorite);
                 } else if (!localFilename) {
-                    html += _librarySyncButton(providerId, songId, 'px-2 py-1');
                     html += _librarySyncStatusMarkup(providerId, songId, 'inline');
                 }
                 html += `</div></div>`;
@@ -5783,9 +5764,13 @@ function _removeLibCardsForFilename(filename) {
     _bumpLibNavGeneration();
 }
 
-async function syncLibrarySong(providerId, songId, button, { playWhenReady = false } = {}) {
+async function syncLibrarySong(providerId, songId, { playWhenReady = false } = {}) {
     if (!providerId || !songId) return;
     const currentState = _librarySyncState(providerId, songId);
+    if (currentState && currentState.status === 'synced' && currentState.localFilename) {
+        if (playWhenReady) playSong(currentState.localFilename);
+        return currentState.result || { filename: currentState.localFilename };
+    }
     if (currentState && currentState.status === 'syncing') return null;
     _setLibrarySyncState(providerId, songId, { status: 'syncing' });
     try {
@@ -5798,9 +5783,9 @@ async function syncLibrarySong(providerId, songId, button, { playWhenReady = fal
         if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
         const localFilename = data.filename || data.localFilename || data.local_filename || data.playFilename || data.play_filename || '';
         const message = localFilename
-            ? 'Synced and ready to play'
-            : (data.cachedPath ? 'Synced to local cache' : 'Synced');
-        _setLibrarySyncState(providerId, songId, { status: 'synced', message });
+            ? 'Ready to play'
+            : (data.cachedPath ? 'Loaded to local cache' : 'Loaded');
+        _setLibrarySyncState(providerId, songId, { status: 'synced', message, localFilename, result: data });
         _treeStats = null;
         _favTreeStats = null;
         _tuningNames = null;
@@ -5809,7 +5794,7 @@ async function syncLibrarySong(providerId, songId, button, { playWhenReady = fal
         return data;
     } catch (error) {
         _setLibrarySyncState(providerId, songId, { status: 'error', message: error.message || 'Unknown error' });
-        console.warn('Library sync failed:', error);
+        console.warn('Remote library load failed:', error);
         return null;
     }
 }
@@ -5823,13 +5808,6 @@ function _renderLibrarySyncState(providerId, songId) {
     const state = _librarySyncState(providerId, songId);
     const providerAttr = CSS.escape(encodeURIComponent(providerId));
     const songAttr = CSS.escape(encodeURIComponent(songId));
-    const buttonSelector = `.library-sync-btn[data-library-sync-provider="${providerAttr}"][data-library-sync-song="${songAttr}"]`;
-    for (const syncButton of document.querySelectorAll(buttonSelector)) {
-        syncButton.textContent = _librarySyncText(state);
-        syncButton.disabled = !!state && (state.status === 'syncing' || state.status === 'synced');
-        if (state && state.status === 'syncing') syncButton.setAttribute('aria-busy', 'true');
-        else syncButton.removeAttribute('aria-busy');
-    }
     const statusSelector = `[data-library-sync-status][data-library-sync-provider="${providerAttr}"][data-library-sync-song="${songAttr}"]`;
     for (const status of document.querySelectorAll(statusSelector)) {
         const layout = status.classList.contains('ml-1') ? 'inline' : 'block';
@@ -5862,17 +5840,6 @@ document.addEventListener('click', e => {
         retuneSong(btn.dataset.retune, decodeURIComponent(btn.dataset.title), btn.dataset.tuning, btn.dataset.target || 'E Standard');
         return;
     }
-    // Remote library sync button
-    const syncBtn = e.target.closest('.library-sync-btn');
-    if (syncBtn) {
-        e.stopPropagation();
-        syncLibrarySong(
-            decodeURIComponent(syncBtn.dataset.librarySyncProvider || ''),
-            decodeURIComponent(syncBtn.dataset.librarySyncSong || ''),
-            syncBtn,
-        );
-        return;
-    }
     // Remote song card / row without a local playable file yet.
     const remoteEntry = e.target.closest('[data-library-song]');
     if (remoteEntry && !remoteEntry.dataset.play && !e.target.closest('button')) {
@@ -5882,7 +5849,6 @@ document.addEventListener('click', e => {
         syncLibrarySong(
             providerId,
             decodeURIComponent(remoteEntry.dataset.librarySong || ''),
-            remoteEntry.querySelector('.library-sync-btn'),
             { playWhenReady: true },
         );
         return;
