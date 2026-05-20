@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck shell=bash
+# shellcheck shell=bash 
 # =============================================================================
 # build-proxmox-ct.sh  –  Build a Proxmox LXC rootfs from WSL2 (no lxc-start)
 #
@@ -83,7 +83,19 @@ fi
 mkdir -p "$BUILD_BASE"
 
 DOTNET_CHANNEL="10.0"
-VGMSTREAM_URL="https://github.com/vgmstream/vgmstream/releases/download/r2083/vgmstream-linux-cli.zip"
+VGMSTREAM_REF="r2083"
+VGMSTREAM_REPO="https://github.com/vgmstream/vgmstream.git"
+# Static ffmpeg binaries from BtbN/FFmpeg-Builds (GPL, 7.1 series).
+# To bump: pick a new autobuild-* tag from
+#   https://github.com/BtbN/FFmpeg-Builds/releases
+# download the two linux gpl-7.1 tarballs, re-run
+#   sha256sum ffmpeg-*-linux{64,arm64}-gpl-7.1.tar.xz
+# and update FFMPEG_RELEASE + both builds + hashes below.
+FFMPEG_RELEASE="autobuild-2026-05-18-18-09"
+FFMPEG_BUILD_AMD64="ffmpeg-n7.1.4-5-ged860ef7d9-linux64-gpl-7.1.tar.xz"
+FFMPEG_BUILD_ARM64="ffmpeg-n7.1.4-5-ged860ef7d9-linuxarm64-gpl-7.1.tar.xz"
+FFMPEG_SHA256_AMD64="f0dc9851561a64a9020e013a9d39ce344a06373444ab301c946bc2d9caecacf5"
+FFMPEG_SHA256_ARM64="fef25a656a5d5e6c2a860ca45445e73f64958c9a8a5910cd5676ff23b99a65fa"
 # Pin Rocksmith2014.NET to a specific commit so RsCli builds are reproducible.
 # Bump this when intentionally pulling upstream changes.
 RS2014_NET_REPO="https://github.com/iminashi/Rocksmith2014.NET.git"
@@ -92,14 +104,14 @@ RS2014_NET_COMMIT="b87c9a3afd31c40ade9685a9244e718e7581c0cb"
 #   curl -fsSL <URL> | sha256sum
 # Set SKIP_HASH_CHECK=1 to bypass verification (e.g. when Microsoft rolls
 # dotnet-install.sh and the pinned hash hasn't been refreshed yet).
-VGMSTREAM_SHA256="7fc17225b7a49b8f1e7850f6cc5bdaf73c35e81ee5774bb12211ebc85188a4ff"
 # dot.net/v1/dotnet-install.sh is a rolling URL; refresh this hash whenever
 # Microsoft updates the installer (the build will abort with a clear mismatch).
-DOTNET_INSTALL_SHA256="102a6849303713f15462bb28eb10593bf874bbeec17122e0522f10a3b57ce442"
+DOTNET_INSTALL_SHA256="082f7685e156738a1b2e2ed8381a621870d4ce8e8c59278034556f05c186eb2e"
 
 APP_DIR="/app"
 VENV_DIR="/opt/app-venv"
 RSCLI_DIR="/opt/rscli"
+PIP_VERSION="26.1.1"
 DLC_DIR="/dlc"
 CONFIG_DIR="/config"
 ROCKSMITH_DIR="/rocksmith"
@@ -248,18 +260,34 @@ info "Installing system packages …"
 # /etc/resolv.conf to the resolved stub — a minimal debootstrap does not
 # guarantee these binaries on its own, which would yield broken DNS in the
 # imported CT.
-r "apt-get update -qq && apt-get install -y --no-install-recommends \
+#
+# NOTE: ffmpeg is NOT installed via apt — a static binary is copied in
+# step 5b instead, avoiding the huge codec + TLS dependency tree.
+# vgmstream-cli is built from source in step 5, needing runtime libs:
+# libmpg123-0, libvorbisfile3, libspeex1, libopus0.
+r "apt-get update -qq \
+    && apt-get -y upgrade \
+    && apt-get install -y --no-install-recommends \
     systemd-sysv systemd-resolved \
     python3 python3-pip python3-venv \
-    ffmpeg \
     fluidsynth \
     fluid-soundfont-gm \
     libsndfile1 \
-    curl \
-    unzip \
-    megatools \
+    libmpg123-0 \
+    libvorbisfile3 \
+    libspeex1 \
+    libopus0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*"
 ok "System packages installed."
+
+# Build-time dependencies for compiling vgmstream-cli from source (step 5).
+# Purged after the build in step 5c to keep the rootfs lean.
+info "Installing vgmstream build dependencies (temporary) …"
+r "apt-get update -qq && apt-get install -y --no-install-recommends \
+    build-essential cmake pkg-config yasm \
+    libmpg123-dev libvorbis-dev libspeex-dev libopus-dev git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*"
+ok "Build dependencies installed."
 
 # =============================================================================
 # 3. Install .NET  (build-time only — RsCli is published with --self-contained,
@@ -268,15 +296,20 @@ ok "System packages installed."
 #    final stage)
 # =============================================================================
 info "Installing .NET ${DOTNET_CHANNEL} SDK (build-only, removed after publish) …"
-r "curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh"
-verify_sha256 "${ROOTFS}/tmp/dotnet-install.sh" "${DOTNET_INSTALL_SHA256}" "dotnet-install.sh"
-r "chmod +x /tmp/dotnet-install.sh \
+# Download on the host side — systemd-nspawn mounts a private tmpfs over
+# /tmp inside the container, so files written by r("curl … -o /tmp/…")
+# don't appear at ${ROOTFS}/tmp/ on the host for hash verification.
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o "${BUILD_BASE}/dotnet-install.sh"
+verify_sha256 "${BUILD_BASE}/dotnet-install.sh" "${DOTNET_INSTALL_SHA256}" "dotnet-install.sh"
+cp "${BUILD_BASE}/dotnet-install.sh" "${ROOTFS}/root/dotnet-install.sh"
+rm -f "${BUILD_BASE}/dotnet-install.sh"
+r "chmod +x /root/dotnet-install.sh \
     && DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
        DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-       /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
+       /root/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
            --install-dir /usr/share/dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm /tmp/dotnet-install.sh"
+    && rm /root/dotnet-install.sh"
 ok ".NET installed."
 
 # =============================================================================
@@ -331,15 +364,61 @@ rm -rf "${ROOTFS}/opt/rs2014" \
 ok "RsCli built → ${RSCLI_DIR}"
 
 # =============================================================================
-# 5. vgmstream-cli
+# 5. Build vgmstream-cli from source (mirrors Dockerfile stage 1b)
 # =============================================================================
-info "Installing vgmstream-cli …"
-r "curl -fSL '${VGMSTREAM_URL}' -o /tmp/vgm.zip"
-verify_sha256 "${ROOTFS}/tmp/vgm.zip" "${VGMSTREAM_SHA256}" "vgmstream-linux-cli.zip"
-r "unzip -o /tmp/vgm.zip -d /usr/local/bin/ \
-    && chmod +x /usr/local/bin/vgmstream-cli \
-    && rm /tmp/vgm.zip"
-ok "vgmstream-cli installed."
+info "Building vgmstream-cli from source (${VGMSTREAM_REF}) …"
+# Clone into /root/ — systemd-nspawn mounts a private tmpfs over /tmp,
+# hiding anything placed at ${ROOTFS}/tmp/ by the host.
+rm -rf "${ROOTFS}/root/vgmstream"
+git clone --depth 1 --branch "${VGMSTREAM_REF}" "${VGMSTREAM_REPO}" "${ROOTFS}/root/vgmstream"
+
+r "cmake -S /root/vgmstream -B /root/vgmstream/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_V123=OFF \
+        -DBUILD_AUDACIOUS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DUSE_FFMPEG=OFF \
+    && cmake --build /root/vgmstream/build --config Release --target vgmstream_cli -j\$(nproc) \
+    && cp /root/vgmstream/build/cli/vgmstream-cli /usr/local/bin/vgmstream-cli \
+    && chmod +x /usr/local/bin/vgmstream-cli"
+rm -rf "${ROOTFS}/root/vgmstream"
+ok "vgmstream-cli built."
+
+# =============================================================================
+# 5b. Static ffmpeg (mirrors Dockerfile stage 1c — BtbN GPL build)
+# =============================================================================
+info "Installing static ffmpeg …"
+case "$TARGETARCH" in
+  arm64) FFMPEG_TARBALL="${FFMPEG_BUILD_ARM64}"; FFMPEG_SHA256="${FFMPEG_SHA256_ARM64}" ;;
+  amd64) FFMPEG_TARBALL="${FFMPEG_BUILD_AMD64}"; FFMPEG_SHA256="${FFMPEG_SHA256_AMD64}" ;;
+esac
+
+curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_RELEASE}/${FFMPEG_TARBALL}" \
+    -o "${BUILD_BASE}/ffmpeg.tar.xz"
+verify_sha256 "${BUILD_BASE}/ffmpeg.tar.xz" "${FFMPEG_SHA256}" "ffmpeg-static (${TARGETARCH})"
+
+mkdir -p "${BUILD_BASE}/ffmpeg-extract"
+tar -xJf "${BUILD_BASE}/ffmpeg.tar.xz" -C "${BUILD_BASE}/ffmpeg-extract" --strip-components=1
+cp "${BUILD_BASE}/ffmpeg-extract/bin/ffmpeg"  "${ROOTFS}/usr/local/bin/ffmpeg"
+cp "${BUILD_BASE}/ffmpeg-extract/bin/ffprobe" "${ROOTFS}/usr/local/bin/ffprobe"
+chmod +x "${ROOTFS}/usr/local/bin/ffmpeg" "${ROOTFS}/usr/local/bin/ffprobe"
+
+# GPL compliance — keep the license text in the rootfs.
+mkdir -p "${ROOTFS}/usr/share/doc/ffmpeg"
+cp "${BUILD_BASE}/ffmpeg-extract/LICENSE.txt" "${ROOTFS}/usr/share/doc/ffmpeg/LICENSE.txt"
+
+rm -rf "${BUILD_BASE}/ffmpeg-extract" "${BUILD_BASE}/ffmpeg.tar.xz"
+ok "Static ffmpeg installed."
+
+# =============================================================================
+# 5c. Clean up build-time dependencies
+# =============================================================================
+info "Removing build-time dependencies …"
+r "apt-get purge -y --auto-remove \
+    build-essential cmake pkg-config yasm \
+    libmpg123-dev libvorbis-dev libspeex-dev libopus-dev git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*"
+ok "Build dependencies removed."
 
 # =============================================================================
 # 6. Python application
@@ -380,6 +459,7 @@ done
 
 info "Creating Python venv and installing dependencies …"
 r "python3 -m venv ${VENV_DIR} \
+    && ${VENV_DIR}/bin/pip install --no-cache-dir 'pip==${PIP_VERSION}' \
     && ${VENV_DIR}/bin/pip install --no-cache-dir -r ${APP_DIR}/requirements.txt"
 ok "Python venv + dependencies installed."
 
@@ -513,8 +593,8 @@ done
 # -h preserves symlinks: a Python venv keeps /opt/app-venv/bin/python3 as a
 # symlink to /usr/bin/python3, and a plain `chown -R` would chase it and
 # rewrite the system interpreter's ownership inside the rootfs.
-SVC_UID="$(r "id -u ${SVC_USER}")"
-SVC_GID="$(r "id -g ${SVC_USER}")"
+SVC_UID="$(r "id -u ${SVC_USER}" | tr -d '\r')"
+SVC_GID="$(r "id -g ${SVC_USER}" | tr -d '\r')"
 chown -hR "${SVC_UID}:${SVC_GID}" \
               "${ROOTFS}${APP_DIR}" "${ROOTFS}${CONFIG_DIR}" \
               "${ROOTFS}${DLC_DIR}" "${ROOTFS}${VENV_DIR}"
