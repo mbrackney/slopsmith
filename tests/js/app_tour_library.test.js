@@ -45,6 +45,14 @@ test('library tour adds provider step only when multiple browsable providers exi
         'buildSteps must insert the provider instruction into the tour');
 });
 
+test('library tour inserts provider step after the search step', () => {
+    const buildSteps = extractBlock(SRC, 'async function _buildSteps()');
+    assert.match(buildSteps, /insertAt\s*===\s*-1\s*\?\s*1\s*:\s*insertAt\s*\+\s*1/,
+        'Provider step must be inserted after the search step when search is found');
+    assert.match(buildSteps, /splice\([\s\S]*PROVIDER_STEP/,
+        'buildSteps must splice PROVIDER_STEP into the tour');
+});
+
 test('provider tour step targets the library provider selector', () => {
     assert.match(SRC, /id:\s*['"]library-provider['"]/,
         'Provider step must have a stable id');

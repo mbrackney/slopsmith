@@ -886,11 +886,16 @@ async function showScreen(id) {
     _bumpLibNavGeneration();
     if (id === 'home') {
         _libScrollOnNextRender.home = true;
+        const beforeProviderId = _activeLibraryProviderId();
         await loadLibraryProviders({ restoreSaved: true });
-        _libEpoch++;
-        currentPage = 0;
-        _treeStats = null;
-        stopInfiniteScroll();
+        if (_activeLibraryProviderId() !== beforeProviderId) {
+            _resetLibraryProviderViewState();
+        } else {
+            _libEpoch++;
+            currentPage = 0;
+            _treeStats = null;
+            stopInfiniteScroll();
+        }
         loadLibrary(0);
     }
     if (id === 'favorites') { _libScrollOnNextRender.favorites = true; loadFavorites(); }
@@ -1081,10 +1086,10 @@ async function loadLibraryProviders({ restoreSaved = false, reloadOnChange = fal
     const hasSavedProvider = !!_providerById(savedProviderId);
     const hasSelectedProvider = !!_providerById(_selectedLibraryProviderId);
     if (hasSavedProvider) _selectedLibraryProviderId = savedProviderId;
-    else if (restoreSaved) {
+    else if (!hasSelectedProvider) {
         _selectedLibraryProviderId = 'local';
-        _writePersistedChoice(_LIB_PROVIDER_KEY, 'local');
-    } else if (!hasSelectedProvider) _selectedLibraryProviderId = 'local';
+        if (restoreSaved) _writePersistedChoice(_LIB_PROVIDER_KEY, 'local');
+    }
 
     _renderLibraryProviderSelector();
     const afterProviderId = _activeLibraryProviderId();

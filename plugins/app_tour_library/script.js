@@ -51,7 +51,7 @@
 
         var insertAt = steps.findIndex(function (step) { return step && step.id === 'search'; });
         var nextSteps = steps.slice();
-        nextSteps.splice(insertAt === -1 ? 1 : insertAt, 0, PROVIDER_STEP);
+        nextSteps.splice(insertAt === -1 ? 1 : insertAt + 1, 0, PROVIDER_STEP);
         return nextSteps;
     }
 
