@@ -1943,13 +1943,17 @@ async function loadSettings() {
     }
 }
 
-// Updates the fill on slider elements. Expects a CSS variable --range-pct used in the track fill styling.
-const handleSliderInput = (el) => {
+// Updates the fill on slider elements. Expects a CSS variable --range-pct used
+// in the track fill styling. Declared as a function (not a const) so it is
+// hoisted onto window — audio-mixer.js calls it as window.handleSliderInput,
+// matching the window.playSong / window.showScreen cross-script convention.
+function handleSliderInput(el) {
+    if (!el) return;
     const min = el.min || 0;
     const max = el.max || 100;
     const pct = (el.value - min) / (max - min) * 100;
     el.style.setProperty('--range-pct', pct + '%');
-};
+}
 
 // A/V sync calibration. Positive = audio runs ahead of visuals; we
 // add this to audio.currentTime when driving the highway so the
