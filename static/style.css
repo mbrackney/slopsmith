@@ -440,6 +440,7 @@ html { scroll-behavior: smooth; }
     cursor: pointer;
 }
 #mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
+  height: 16px; /* Match the Firefox ::-moz-range-track height so the fader renders consistently across browsers */
   background: linear-gradient(to right, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-900, 10, 10, 18)) var(--range-pct, 0%));
   border-radius: 8px;
   border: 1px solid rgb(55 65 81 / var(--tw-border-opacity, 1));
@@ -487,6 +488,7 @@ html { scroll-behavior: smooth; }
         margin: 0;
     }
     #mixer-popover .mixer-strip-fader::-webkit-slider-runnable-track {
+        height: auto; /* Vertical slider: let the track span the full length instead of the fixed 16px used by the rotated fallback */
         background: linear-gradient(to top, rgb(var(--sm-accent, 64, 128, 224)) var(--range-pct, 0%), rgb(var(--sm-bg-900, 10, 10, 18)) var(--range-pct, 0%));
         border-radius: 8px;
     }
