@@ -5823,6 +5823,11 @@ async function bootstrapPluginsAndUi() {
     // toggling and triggers the initial load.
     setLibView(libView);
     try { await loadSettings(); } catch (e) { console.warn('initial loadSettings failed:', e); }
+    // Seed the track fill on every themed slider so they render correctly
+    // before any interaction — e.g. the speed slider (untouched by
+    // loadSettings) before the first playSong, or follower windows that
+    // enter the player screen via showScreen('player') without playSong.
+    document.querySelectorAll('.slider-input').forEach(el => handleSliderInput(el));
     checkScanAndLoad();
 
     const plugins = await bootstrapPluginsAndUi();
