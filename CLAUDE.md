@@ -246,6 +246,8 @@ window.slopsmithViz_piano.matchesArrangement = function (songInfo) {
 
 **WebGL viz in Auto mode.** Auto evaluation runs on every `song:ready` regardless of which renderer is active. Auto-installing a WebGL renderer when the canvas is currently 2D — or reverting from a WebGL Auto pick to the default 2D — works without a reload because `setRenderer` swaps the canvas element when `contextType` differs (see "Canvas context-type swapping" above). WebGL viz can therefore safely declare `matchesArrangement` and rely on Auto. For 3D Highway specifically, `_canRun3D()` in app.js still gates Auto from picking it on machines without WebGL2 — that fallback is independent of canvas swapping.
 
+**Optional factory statics for host plugins.** A host plugin with renderer-specific per-panel UI may read optional statics attached to a viz factory. For example, `factory.panelControls` can expose host-readable metadata describing a curated control surface for that renderer. Treat this as opt-in metadata for hosts that know about it; the core setRenderer contract does not require or consume `panelControls`.
+
 #### 2. Overlay contract — for add-on layers
 
 Plugins that add a layer on top of whichever visualization is active — HUDs, fretboard diagrams, chord labels, practice feedback — don't replace the renderer. They manage their own canvas, their own rAF loop, and a toggle button somewhere visible (typically a navbar pill), reading public highway state via the getters:

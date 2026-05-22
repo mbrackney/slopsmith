@@ -2,6 +2,8 @@
 
 Sloppak is Slopsmith's open, hand-editable song format. This guide is for developers who want to **read**, **write**, or **extend** the format — including adding new data types like drum tabs, vocal pitches, lighting cues, key/scale annotations, or anything else a future visualization plugin might need.
 
+> If you're a **user** wanting to modify an existing sloppak — record your own rhythm stem, fix metadata, swap cover art, replace a Demucs split — see [sloppak-hand-editing.md](sloppak-hand-editing.md). That guide is the practical, step-by-step companion to this developer reference.
+
 The authoritative format reference lives in code (`lib/sloppak.py`, `lib/song.py`); this doc explains the why, the how, and the conventions you should follow when adding to it.
 
 ---
@@ -133,7 +135,7 @@ If present, points at a JSON file containing a flat list of syllable objects:
 |---|---|
 | `t` | Time in seconds |
 | `d` | Duration in seconds |
-| `w` | Syllable text. `-` suffix joins to next word; `+` is a line break sentinel |
+| `w` | Syllable text. Trailing `-` joins to the next syllable as one word; trailing `+` marks the last syllable of a line (renderer wraps after it). Both are suffixes on a real syllable — not standalone entries. See `static/highway.js` for the rendering: `raw.endsWith('+')` flags end-of-line, and `sylText` strips the trailing marker before drawing |
 
 ---
 

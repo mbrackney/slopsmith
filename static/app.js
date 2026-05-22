@@ -1927,7 +1927,10 @@ async function loadSettings() {
         : 100;
     const masterySlider = document.getElementById('mastery-slider');
     const masteryLabel = document.getElementById('mastery-label');
-    if (masterySlider) masterySlider.value = masteryPct;
+    if (masterySlider) {
+        masterySlider.value = masteryPct;
+        handleSliderInput(masterySlider);
+    }
     if (masteryLabel) masteryLabel.textContent = masteryPct + '%';
     highway.setMastery(masteryPct / 100);
     // Route the loaded value through setAvOffsetMs so the highway's
@@ -1941,6 +1944,18 @@ async function loadSettings() {
     if (window.slopsmithDesktop && typeof window.slopsmithDesktop.pickDirectory === 'function') {
         document.getElementById('btn-pick-dlc')?.classList.remove('hidden');
     }
+}
+
+// Updates the fill on slider elements. Expects a CSS variable --range-pct used
+// in the track fill styling. Declared as a function (not a const) so it is
+// hoisted onto window — audio-mixer.js calls it as window.handleSliderInput,
+// matching the window.playSong / window.showScreen cross-script convention.
+function handleSliderInput(el) {
+    if (!el) return;
+    const min = el.min || 0;
+    const max = el.max || 100;
+    const pct = (el.value - min) / (max - min) * 100;
+    el.style.setProperty('--range-pct', pct + '%');
 }
 
 // A/V sync calibration. Positive = audio runs ahead of visuals; we
@@ -1966,12 +1981,18 @@ function setAvOffsetMs(ms, skipPersist) {
     if (typeof highway !== 'undefined' && highway?.setAvOffset) highway.setAvOffset(_avOffsetMs);
     // Sync any visible Settings slider
     const avSlider = document.getElementById('setting-av-offset');
-    if (avSlider) avSlider.value = _avOffsetMs;
+    if (avSlider) {
+        avSlider.value = _avOffsetMs;
+        handleSliderInput(avSlider);
+    }
     const avVal = document.getElementById('setting-av-offset-val');
     if (avVal) avVal.textContent = Math.round(_avOffsetMs);
     // Sync the inline player-bar slider (live-tunable while playing)
     const playerAvSlider = document.getElementById('player-av-offset-slider');
-    if (playerAvSlider) playerAvSlider.value = _avOffsetMs;
+    if (playerAvSlider) {
+        playerAvSlider.value = _avOffsetMs;
+        handleSliderInput(playerAvSlider);
+    }
     const playerAvLabel = document.getElementById('player-av-offset-label');
     if (playerAvLabel) {
         const rounded = Math.round(_avOffsetMs);
@@ -2029,6 +2050,42 @@ async function saveSettings() {
     });
     const data = await resp.json();
     document.getElementById('settings-status').textContent = data.message || data.error;
+}
+
+// Persist a single settings field the instant a control changes (used by
+// the Settings dropdowns). The /api/settings POST handler merges only the
+// keys present in the body, so this one-field write won't clobber dlc_dir
+// or any other setting. No debounce: a <select> change event fires once
+// per selection, unlike the A/V / mastery sliders' per-pixel oninput.
+//
+// The Settings-dropdown autosaves run through one chain so their POSTs are
+// sent one at a time, in the order the user made the changes — the last
+// selection is always the last write, for both rapid changes to one
+// dropdown and back-to-back changes across different dropdowns. The A/V
+// and mastery slider autosaves POST directly (not through this chain);
+// the server-side config.json lock is what keeps those from racing the
+// dropdown writes (see save_settings() in server.py).
+let _settingSaveChain = Promise.resolve();
+function persistSetting(key, value) {
+    const next = _settingSaveChain.then(() => _postSetting(key, value));
+    // Swallow failures so one failed write doesn't poison the chain and
+    // block every later save.
+    _settingSaveChain = next.catch(() => {});
+    return next;
+}
+async function _postSetting(key, value) {
+    const status = document.getElementById('settings-status');
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: value }),
+        });
+        const data = await resp.json();
+        if (status) status.textContent = data.message || data.error || '';
+    } catch (e) {
+        if (status) status.textContent = 'Save failed: ' + e.message;
+    }
 }
 
 // ── Settings export / import (slopsmith#113) ─────────────────────────────────
@@ -3625,6 +3682,7 @@ async function playSong(filename, arrangement) {
     isPlaying = false;
     document.getElementById('btn-play').textContent = '▶ Play';
     document.getElementById('speed-slider').value = 100;
+    handleSliderInput(document.getElementById('speed-slider'));
     document.getElementById('speed-label').textContent = '1.0x';
     clearLoop();
 
@@ -3748,14 +3806,17 @@ async function seekBy(s) {
     await _audioSeek(Math.max(0, _audioTime() + s), 'seek-by');
 }
 function setSpeed(v) {
+    const speedSlider = document.getElementById('speed-slider');
     if (window._juceMode) {
         audio.playbackRate = 1.0;
-        document.getElementById('speed-slider').value = 100;
+        speedSlider.value = 100;
         document.getElementById('speed-label').textContent = '1.0x';
+        handleSliderInput(speedSlider);
         return;
     }
     audio.playbackRate = parseFloat(v);
     document.getElementById('speed-label').textContent = parseFloat(v).toFixed(2) + 'x';
+    handleSliderInput(speedSlider);
 }
 // Master-difficulty slider (slopsmith#48). Persists partial via
 // /api/settings — the POST handler merges only the keys present, so
@@ -3785,6 +3846,7 @@ function setMastery(v) {
     if (!Number.isFinite(parsed)) return;
     const pct = Math.max(0, Math.min(100, parsed));
     document.getElementById('mastery-label').textContent = pct + '%';
+    handleSliderInput(document.getElementById('mastery-slider'));
     highway.setMastery(pct / 100);
     _persistMastery(pct);
 }
@@ -6130,6 +6192,11 @@ async function bootstrapPluginsAndUi() {
     // toggling and triggers the initial load.
     setLibView(libView);
     try { await loadSettings(); } catch (e) { console.warn('initial loadSettings failed:', e); }
+    // Seed the track fill on every themed slider so they render correctly
+    // before any interaction — e.g. the speed slider (untouched by
+    // loadSettings) before the first playSong, or follower windows that
+    // enter the player screen via showScreen('player') without playSong.
+    document.querySelectorAll('.slider-input').forEach(el => handleSliderInput(el));
     checkScanAndLoad();
 
     const plugins = await bootstrapPluginsAndUi();

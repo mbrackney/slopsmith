@@ -1337,7 +1337,7 @@ def register_plugin_api(app: FastAPI):
                 settings = p["_manifest"].get("settings", {})
                 settings_file = p["_dir"] / (settings.get("html", "settings.html") if isinstance(settings, dict) else "settings.html")
                 if settings_file.exists():
-                    return HTMLResponse(settings_file.read_text())
+                    return HTMLResponse(settings_file.read_text(encoding="utf-8"))
         return HTMLResponse("", status_code=404)
 
     @app.get("/api/plugins/{plugin_id}/tour.json")

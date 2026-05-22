@@ -694,7 +694,7 @@ def _get_dlc_dir(cfg: dict | None = None) -> Path | None:
         config_file = CONFIG_DIR / "config.json"
         if config_file.exists():
             try:
-                cfg = json.loads(config_file.read_text())
+                cfg = json.loads(config_file.read_text(encoding="utf-8"))
             except Exception:
                 pass
     if isinstance(cfg, dict):
@@ -2356,6 +2356,10 @@ def delete_loop(loop_id: int):
 
 # ── Settings API ──────────────────────────────────────────────────────────────
 
+# Serializes the read-modify-write in save_settings(). See the note there.
+_settings_lock = threading.Lock()
+
+
 def _default_settings():
     """Fallback settings returned when config.json is missing or
     unreadable. Also used to seed a fresh cfg on first-run POSTs so a
@@ -2381,7 +2385,11 @@ def _load_config(config_file):
     if not config_file.exists():
         return None
     try:
-        parsed = json.loads(config_file.read_text())
+        # Explicit UTF-8: save_settings()/import write config.json as
+        # UTF-8 bytes, so the read must not depend on the platform's
+        # default text encoding (cp1252 on Windows would mojibake or
+        # UnicodeDecodeError on a non-ASCII DLC path).
+        parsed = json.loads(config_file.read_text(encoding="utf-8"))
     except Exception:
         return None
     return parsed if isinstance(parsed, dict) else None
@@ -2398,19 +2406,17 @@ def save_settings(data: dict):
     # Partial-update: merge only keys present in the request body so
     # single-key POSTs (like the difficulty slider's oninput) don't
     # clobber unrelated settings on disk.
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    #
+    # Validation runs FIRST, outside _settings_lock. The dlc_dir branch
+    # stats the folder and counts .psarc files, which can be slow on a
+    # large or networked DLC dir — holding the lock across it would block
+    # every other settings writer (dropdown/slider autosaves, imports).
+    # So validation only resolves `updates` (the keys to merge); the
+    # short read-merge-write critical section at the end takes the lock.
     config_file = CONFIG_DIR / "config.json"
-    # Seed defaults when config.json is missing, unreadable, or parses
-    # to a non-dict (e.g. `[]`, `42`). Without the non-dict guard, the
-    # next `cfg["..."] = ...` assignment would raise TypeError and 500
-    # the public endpoint. Seeding also ensures single-key POSTs (the
-    # difficulty slider's fire-and-forget write) don't produce a config
-    # file missing the dlc_dir fallback GET would have surfaced.
-    cfg = _load_config(config_file)
-    if cfg is None:
-        cfg = _default_settings()
+    updates: dict = {}
+    messages: list[str] = []
 
-    messages = []
     if "dlc_dir" in data:
         dlc_path = data["dlc_dir"]
         # null / missing is no-op (preserve on-disk value). Only an
@@ -2421,10 +2427,10 @@ def save_settings(data: dict):
         elif not isinstance(dlc_path, str):
             return {"error": "dlc_dir must be a string path or empty"}
         elif dlc_path == "":
-            cfg["dlc_dir"] = ""
+            updates["dlc_dir"] = ""
         else:
             if Path(dlc_path).is_dir():
-                cfg["dlc_dir"] = dlc_path
+                updates["dlc_dir"] = dlc_path
                 count = sum(1 for f in Path(dlc_path).iterdir() if f.suffix == ".psarc")
                 messages.append(f"DLC folder: {count} .psarc files found")
             else:
@@ -2443,7 +2449,7 @@ def save_settings(data: dict):
             elif not isinstance(raw, str):
                 return {"error": f"{key} must be a string or empty"}
             else:
-                cfg[key] = raw
+                updates[key] = raw
     if "master_difficulty" in data:
         # Coerce defensively — public endpoint, so `null`, `""`, or a
         # non-numeric string shouldn't 500 the request. float() accepts
@@ -2456,7 +2462,7 @@ def save_settings(data: dict):
         if isinstance(raw, bool):
             return {"error": "master_difficulty must be a number between 0 and 100"}
         try:
-            cfg["master_difficulty"] = max(0, min(100, int(float(raw))))
+            updates["master_difficulty"] = max(0, min(100, int(float(raw))))
         except (TypeError, ValueError, OverflowError):
             # OverflowError covers int(float("inf")) / int(float("1e309"))
             # which Python raises distinctly from ValueError.
@@ -2475,7 +2481,7 @@ def save_settings(data: dict):
         if isinstance(raw, bool):
             return {"error": "av_offset_ms must be a number between -1000 and 1000"}
         try:
-            cfg["av_offset_ms"] = max(-1000.0, min(1000.0, float(raw)))
+            updates["av_offset_ms"] = max(-1000.0, min(1000.0, float(raw)))
         except (TypeError, ValueError, OverflowError):
             return {"error": "av_offset_ms must be a number between -1000 and 1000"}
 
@@ -2487,9 +2493,25 @@ def save_settings(data: dict):
         if raw is not None:
             if not isinstance(raw, str) or raw not in ("both", "pc", "mac"):
                 return {"error": "psarc_platform must be 'both', 'pc', or 'mac'"}
-            cfg["psarc_platform"] = raw
+            updates["psarc_platform"] = raw
 
-    config_file.write_text(json.dumps(cfg, indent=2))
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    # Critical section — the read-merge-write must be atomic. FastAPI runs
+    # sync handlers in a threadpool, so two concurrent partial POSTs (e.g.
+    # the two Settings dropdowns auto-saving back-to-back) could each read
+    # the pre-write file and the second write would silently drop the
+    # first's key. /api/settings/import shares _settings_lock for the same
+    # reason. The seed-from-_default_settings() guards a missing/unreadable
+    # /non-dict config.json so the merge can't TypeError and 500 the
+    # endpoint. The write is atomic temp+rename so a concurrent reader
+    # (export, get_settings, the _get_dlc_dir fallback) never sees a torn
+    # file.
+    with _settings_lock:
+        cfg = _load_config(config_file)
+        if cfg is None:
+            cfg = _default_settings()
+        cfg.update(updates)
+        _atomic_write_file(config_file, json.dumps(cfg, indent=2).encode("utf-8"))
     return {"message": ". ".join(messages) if messages else "Settings saved"}
 
 
@@ -3021,10 +3043,14 @@ def import_settings(bundle: dict):
         # plugin state. Full-replace: caller is responsible for the
         # whole dict — this is restore semantics, not partial-update.
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        _atomic_write_file(
-            CONFIG_DIR / "config.json",
-            json.dumps(server_config, indent=2).encode("utf-8"),
-        )
+        # Share _settings_lock with save_settings() so a full-replace
+        # import and a concurrent partial-update POST can't interleave
+        # on config.json and drop each other's write.
+        with _settings_lock:
+            _atomic_write_file(
+                CONFIG_DIR / "config.json",
+                json.dumps(server_config, indent=2).encode("utf-8"),
+            )
     except OSError as e:
         # Phase-1 validation should have caught all foreseeable
         # failures; an OSError here means disk-level trouble (ENOSPC,
@@ -3809,7 +3835,7 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
             config_file = CONFIG_DIR / "config.json"
             if config_file.exists():
                 try:
-                    pref = json.loads(config_file.read_text()).get("default_arrangement", "")
+                    pref = json.loads(config_file.read_text(encoding="utf-8")).get("default_arrangement", "")
                 except Exception:
                     pass
             if pref:
