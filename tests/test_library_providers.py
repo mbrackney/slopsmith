@@ -137,6 +137,12 @@ class NonBrowsableLibraryProvider:
     def tuning_names(self):
         raise AssertionError("provider without library.read capability should not be dispatched")
 
+    def get_art(self, song_id: str):
+        raise AssertionError("get_art should not be dispatched in this test")
+
+    def sync_song(self, song_id: str):
+        raise AssertionError("sync_song should not be dispatched in this test")
+
 
 def test_local_provider_is_default_library_provider(server_mod, client):
     _put(server_mod)

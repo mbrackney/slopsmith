@@ -737,7 +737,15 @@ class LocalLibraryProvider:
 
 
 class LibraryProviderRegistry:
-    _REQUIRED_METHODS = ("query_page", "query_artists", "query_stats", "tuning_names")
+    # Methods required per declared capability — only validated when the
+    # provider advertises the corresponding capability so action-only providers
+    # (e.g. art.read + song.sync without library.read) don't need to implement
+    # unused stubs.
+    _CAPABILITY_METHODS: dict[str, tuple[str, ...]] = {
+        "library.read": ("query_page", "query_artists", "query_stats", "tuning_names"),
+        "art.read": ("get_art",),
+        "song.sync": ("sync_song",),
+    }
     _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
     def __init__(self):
@@ -753,9 +761,13 @@ class LibraryProviderRegistry:
             )
         if not self.provider_label(provider):
             raise ValueError("library provider label must be a non-empty string")
-        for method_name in self._REQUIRED_METHODS:
-            if not callable(self.provider_method(provider, method_name)):
-                raise TypeError(f"library provider {provider_id!r} is missing callable {method_name}()")
+        caps = self.provider_capabilities(provider)
+        for cap, methods in self._CAPABILITY_METHODS.items():
+            if cap not in caps:
+                continue
+            for method_name in methods:
+                if not callable(self.provider_method(provider, method_name)):
+                    raise TypeError(f"library provider {provider_id!r} declares {cap!r} but is missing callable {method_name}()")
         with self._lock:
             if provider_id == "local" and provider_id in self._providers and self._providers[provider_id] is not provider:
                 raise ValueError("the local library provider cannot be replaced")
