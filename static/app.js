@@ -1399,14 +1399,19 @@ async function _renderTuningList() {
     if (!c) return;
     let fetchError = null;
     if (!_tuningNames) {
+        const myEpoch = _libEpoch;
         c.innerHTML = '<div class="text-xs text-gray-500 px-2">Loading...</div>';
         try {
             const params = _applyLibraryProviderToParams(new URLSearchParams());
             const resp = await fetch(`/api/library/tuning-names?${params}`);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
+            // Guard against a provider switch that invalidated _tuningNames
+            // while this request was in flight — discard a stale result.
+            if (myEpoch !== _libEpoch) return;
             _tuningNames = Array.isArray(data.tunings) ? data.tunings : [];
         } catch (e) {
+            if (myEpoch !== _libEpoch) return;
             // Distinguish a server / network failure from "the DB
             // genuinely has no tunings indexed". The latter wants a
             // Full Rescan; the former just wants a retry. Don't cache
@@ -1780,17 +1785,23 @@ function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
         const actionButtons = isLocalProvider && localFilename
             ? `${editBtn(song)}${heartBtn(localFilename, song.favorite)}`
             : '';
+        const canSync = !localFilename && _providerSupports(providerId, 'song.sync');
+        const isInteractive = !!localFilename || canSync;
         const providerAttr = `data-library-provider="${encodeURIComponent(providerId)}"`;
         const entryAttrs = localFilename
             ? `data-play="${encodeURIComponent(localFilename)}" ${providerAttr}`
             : `data-library-provider="${encodeURIComponent(providerId)}" data-library-song="${encodeURIComponent(songId)}"`;
         const ariaAction = localFilename ? 'Play' : 'Load and play';
         const ariaLabel = `${ariaAction} ${title || _libraryDisplayFilename(song, providerId)}${artist ? ' by ' + artist : ''}`;
+        const displayLabel = `${title || _libraryDisplayFilename(song, providerId)}${artist ? ' by ' + artist : ''}`;
+        const interactiveAttrs = isInteractive
+            ? `tabindex="0" role="button" aria-label="${_escAttr(ariaLabel)}"`
+            : `role="listitem" aria-label="${_escAttr(displayLabel)}"`;
         const artHtml = artUrl
             ? `<img src="${_escAttr(artUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                 <span class="placeholder" style="display:none">🎸</span>`
             : `<span class="placeholder" style="display:flex">🎸</span>`;
-        return `<div class="song-card group" ${entryAttrs} data-artist="${_escAttr(artist || '')}" tabindex="0" role="button" aria-label="${_escAttr(ariaLabel)}">
+        return `<div class="song-card group" ${entryAttrs} data-artist="${_escAttr(artist || '')}" ${interactiveAttrs}>
             <div class="card-art">
                 ${artHtml}
                 ${fmtBadge}
@@ -1988,13 +1999,19 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
                 const isSloppak = song.format === 'sloppak';
                 const stdRetune = isLocalProvider && localFilename && !isSloppak && tuning && !song.has_estd &&
                     ['Eb Standard', 'D Standard', 'C# Standard', 'C Standard'].includes(tuning);
+                const canSyncRow = !localFilename && _providerSupports(providerId, 'song.sync');
+                const isInteractiveRow = !!localFilename || canSyncRow;
                 const providerAttr = `data-library-provider="${encodeURIComponent(providerId)}"`;
                 const rowAttrs = localFilename
                     ? `data-play="${encodeURIComponent(localFilename)}" ${providerAttr}`
                     : `data-library-provider="${encodeURIComponent(providerId)}" data-library-song="${encodeURIComponent(songId)}"`;
                 const ariaAction = localFilename ? 'Play' : 'Load and play';
                 const rowAria = _escAttr(`${ariaAction} ${title}${artist.name ? ' by ' + artist.name : ''}`);
-                html += `<div class="song-row" ${rowAttrs} data-artist="${_escAttr(artist.name || '')}" tabindex="0" role="button" aria-label="${rowAria}">`;
+                const rowDisplayLabel = `${title}${artist.name ? ' by ' + artist.name : ''}`;
+                const rowInteractiveAttrs = isInteractiveRow
+                    ? `tabindex="0" role="button" aria-label="${rowAria}"`
+                    : `role="listitem" aria-label="${_escAttr(rowDisplayLabel)}"`;
+                html += `<div class="song-row" ${rowAttrs} data-artist="${_escAttr(artist.name || '')}" ${rowInteractiveAttrs}>`;
                 html += `<div class="flex-1 min-w-0 flex items-center gap-2"><span class="text-sm text-white truncate block">${esc(title)}</span>${formatBadgeInline(song.format, song.stem_count)}</div>`;
                 html += `<div class="flex items-center gap-1.5 flex-shrink-0 text-xs">`;
                 for (const arrangement of (song.arrangements || [])) {

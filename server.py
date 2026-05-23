@@ -810,6 +810,11 @@ class LibraryProviderRegistry:
         raw = self.provider_field(provider, "capabilities", ())
         if raw is None:
             return set()
+        # Guard against a common plugin authoring mistake: passing a single string
+        # instead of a list/tuple. Iterating a string produces individual characters,
+        # none of which would match a valid capability name.
+        if isinstance(raw, str):
+            raw = (raw,) if raw else ()
         return {str(cap) for cap in raw if cap}
 
     def provider_method(self, provider: object, name: str):
