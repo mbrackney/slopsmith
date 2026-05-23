@@ -3814,10 +3814,19 @@ async function seekBy(s) {
 }
 function setSpeed(v) {
     const speedSlider = document.getElementById('speed-slider');
-    const rate = parseFloat(v);
+    const rate = Number(v);
+    if (!Number.isFinite(rate)) {
+        return;
+    }
     if (window._juceMode) {
+        if (window.jucePlayer) { 
+            window.jucePlayer._pos = window.jucePlayer.currentTime;
+            window.jucePlayer._pollAt = performance.now();
+        }
         window.slopsmithDesktop.audio.setBackingSpeed(rate);
-        if (window.jucePlayer) window.jucePlayer._speed = rate;
+        if (window.jucePlayer) {
+            window.jucePlayer._speed = rate;
+        }
     } else {
         audio.playbackRate = rate;
     }
