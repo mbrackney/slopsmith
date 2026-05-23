@@ -1912,6 +1912,10 @@ function goFavTreePage(p) {
 
 // ── Settings ─────────────────────────────────────────────────────────────
 async function loadSettings() {
+    // App Updates UI does not depend on /api/settings — run it first so a
+    // failed fetch below still leaves the desktop updater wired up.
+    // setupAppUpdates() is idempotent via _appUpdatesWired.
+    setupAppUpdates();
     const resp = await fetch('/api/settings');
     const data = await resp.json();
     document.getElementById('dlc-path').value = data.dlc_dir || '';
@@ -1944,7 +1948,6 @@ async function loadSettings() {
     if (window.slopsmithDesktop && typeof window.slopsmithDesktop.pickDirectory === 'function') {
         document.getElementById('btn-pick-dlc')?.classList.remove('hidden');
     }
-    setupAppUpdates();
 }
 
 // ── App Updates (desktop-only) ───────────────────────────────────────────
@@ -6510,10 +6513,6 @@ async function bootstrapPluginsAndUi() {
     // toggling and triggers the initial load.
     setLibView(libView);
     try { await loadSettings(); } catch (e) { console.warn('initial loadSettings failed:', e); }
-    // App Updates UI does not depend on /api/settings — wire it from the
-    // boot path too so a failed loadSettings() (network error etc.) doesn't
-    // leave the block hidden. setupAppUpdates() is idempotent.
-    try { setupAppUpdates(); } catch (e) { console.warn('setupAppUpdates (boot) failed:', e); }
     // App-wide restart banner — must wire once, outside loadSettings(), so a
     // download finishing while the user is on a non-Settings screen still
     // pops the banner.
