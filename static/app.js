@@ -1979,7 +1979,11 @@ function setupAppUpdates() {
     const linuxNote = document.getElementById('app-update-linux-note');
     if (!channelSelect || !checkBtn || !statusEl) return;
 
-    const storedRaw = localStorage.getItem('slopsmith-update-channel');
+    // localStorage access can throw in storage-restricted contexts (sandbox
+    // iframes, privacy modes, etc.); fall back to the default channel so the
+    // panel still renders rather than aborting wiring entirely.
+    let storedRaw = null;
+    try { storedRaw = localStorage.getItem('slopsmith-update-channel'); } catch (_) { /* fall through */ }
     const stored = APP_UPDATE_CHANNELS.includes(storedRaw) ? storedRaw : 'stable';
     channelSelect.value = stored;
 
@@ -2033,7 +2037,15 @@ function setupAppUpdates() {
         showLinuxFallback('Auto-update is not available on Linux.');
         // Keep main informed of the persisted channel even on Linux so
         // cross-platform reasoning about the channel stays consistent.
-        try { void updateApi.setChannel(stored); } catch (_) { /* defensive */ }
+        // setChannel() may return a Promise — chain .catch() so a rejected
+        // promise doesn't surface as an unhandled rejection.
+        try {
+            void Promise.resolve(updateApi.setChannel(stored)).catch((e) => {
+                console.warn('[updater] setChannel(linux) failed:', e);
+            });
+        } catch (e) {
+            console.warn('[updater] setChannel(linux) threw:', e);
+        }
         return;
     }
 
