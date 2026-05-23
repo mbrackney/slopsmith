@@ -2867,11 +2867,9 @@ let isPlaying = false;
 
 function _applyPreservePitch(el) {
     if (!el) return;
-    try {
-        el.preservesPitch = true;
-        el.mozPreservesPitch = true;
-        el.webkitPreservesPitch = true;
-    } catch (_) {}
+    if ('preservesPitch' in el) el.preservesPitch = true;
+    if ('mozPreservesPitch' in el) el.mozPreservesPitch = true;
+    if ('webkitPreservesPitch' in el) el.webkitPreservesPitch = true;
 }
 _applyPreservePitch(audio);
 
