@@ -2865,6 +2865,16 @@ function retuneSong(filename, title, tuning, target) {
 const audio = document.getElementById('audio');
 let isPlaying = false;
 
+function _applyPreservePitch(el) {
+    if (!el) return;
+    try {
+        el.preservesPitch = true;
+        el.mozPreservesPitch = true;
+        el.webkitPreservesPitch = true;
+    } catch (_) {}
+}
+_applyPreservePitch(audio);
+
 // In Slopsmith Desktop, WASAPI Exclusive Mode locks the audio device so Chromium
 // cannot play through it. When window._juceMode is true, song audio is routed
 // through the JUCE backing track player instead of the HTML5 <audio> element.
@@ -3599,6 +3609,7 @@ function _adjustSongVolume(delta) {
 // (slopsmith#54). Delegates to audio-mixer's readSongVolume when loaded so
 // the in-memory fallback (for storage-blocked contexts) is authoritative.
 audio.addEventListener('loadedmetadata', () => {
+    _applyPreservePitch(audio);
     const applySongVolume = window.slopsmith?.audio?.applySongVolume;
     if (typeof applySongVolume === 'function') {
         void applySongVolume();
