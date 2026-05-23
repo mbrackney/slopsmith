@@ -716,14 +716,15 @@ class LocalLibraryProvider:
         return self._db.query_stats(**kwargs)
 
     def tuning_names(self) -> dict:
-        rows = self._db.conn.execute(
-            "SELECT tuning_name, MIN(tuning_sort_key), COUNT(*) "
-            "FROM songs WHERE title != '' AND COALESCE(tuning_name, '') != '' "
-            "GROUP BY tuning_name COLLATE NOCASE "
-            "ORDER BY ABS(COALESCE(MIN(tuning_sort_key), 0)), "
-            "COALESCE(MIN(tuning_sort_key), 0) ASC, "
-            "tuning_name COLLATE NOCASE"
-        ).fetchall()
+        with self._db._lock:
+            rows = self._db.conn.execute(
+                "SELECT tuning_name, MIN(tuning_sort_key), COUNT(*) "
+                "FROM songs WHERE title != '' AND COALESCE(tuning_name, '') != '' "
+                "GROUP BY tuning_name COLLATE NOCASE "
+                "ORDER BY ABS(COALESCE(MIN(tuning_sort_key), 0)), "
+                "COALESCE(MIN(tuning_sort_key), 0) ASC, "
+                "tuning_name COLLATE NOCASE"
+            ).fetchall()
         return {
             "tunings": [
                 {"name": name, "sort_key": int(sk or 0), "count": count}
@@ -860,8 +861,14 @@ def _call_library_provider(provider: object, method_name: str, **kwargs) -> Any:
         raise
     except Exception as exc:
         provider_id = library_providers.provider_id(provider)
-        provider_kind = str(library_providers.provider_field(provider, "kind", "") or "")
-        if provider_kind == "remote":
+        # Treat any non-local provider as remote for error-wrapping purposes.
+        # A plugin may omit `kind` entirely; check against the provider id rather
+        # than relying on the optional field to avoid leaking raw exceptions.
+        is_remote = provider_id != "local"
+        if not is_remote:
+            provider_kind = str(library_providers.provider_field(provider, "kind", "") or "")
+            is_remote = provider_kind not in ("", "local")
+        if is_remote:
             detail = f"This source appears to be offline ({provider_id})."
             message = str(exc).strip()
             if message:
@@ -880,8 +887,11 @@ async def _call_library_provider_async(provider: object, method_name: str, **kwa
             raise
         except Exception as exc:
             provider_id = library_providers.provider_id(provider)
-            provider_kind = str(library_providers.provider_field(provider, "kind", "") or "")
-            if provider_kind == "remote":
+            is_remote = provider_id != "local"
+            if not is_remote:
+                provider_kind = str(library_providers.provider_field(provider, "kind", "") or "")
+                is_remote = provider_kind not in ("", "local")
+            if is_remote:
                 detail = f"This source appears to be offline ({provider_id})."
                 message = str(exc).strip()
                 if message:
@@ -890,6 +900,22 @@ async def _call_library_provider_async(provider: object, method_name: str, **kwa
             raise
     # Synchronous provider method — run in a threadpool so the event loop stays free.
     return await run_in_threadpool(_call_library_provider, provider, method_name, **kwargs)
+
+
+def _safe_art_redirect_url(url: str) -> str | None:
+    """Return the URL if it is safe to redirect to (http/https only), else None."""
+    from urllib.parse import urlparse
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            return None
+        if not parsed.netloc:
+            return None
+        return url
+    except Exception:
+        return None
 
 
 def _library_art_response(result: Any) -> Response:
@@ -904,7 +930,10 @@ def _library_art_response(result: Any) -> Response:
     if isinstance(result, dict):
         url = result.get("url") or result.get("art_url") or result.get("artUrl")
         if isinstance(url, str) and url:
-            return RedirectResponse(url)
+            safe_url = _safe_art_redirect_url(url)
+            if safe_url is None:
+                raise HTTPException(status_code=400, detail="Library provider returned an unsafe art URL")
+            return RedirectResponse(safe_url)
         path = result.get("path") or result.get("file")
         if isinstance(path, (str, Path)):
             media_type = result.get("media_type") or result.get("content_type")
