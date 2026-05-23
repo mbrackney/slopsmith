@@ -623,8 +623,20 @@ def convert_track(
     rs_chords = []
     chord_templates: list[ChordTemplate] = []
     chord_template_map: dict[tuple, int] = {}  # fret tuple → index
+    last_note_per_string: dict[int, RsNote] = {}  # for tie sustain extension
+    _prev_mh_index: int = -1  # sentinel: no previous entry
 
     for entry in schedule:
+        # Clear the tie-tracking state on backward jumps in the playback
+        # schedule (repeat loopbacks, D.S., D.C.).  A tie at the start of
+        # a repeated section must not extend the last note from the previous
+        # pass through that section.  Forward skips (volta alternatives,
+        # al-Coda redirects) are *not* cleared because consecutive schedule
+        # entries that jump forward are still adjacent in the output audio,
+        # so a tie crossing such a boundary is semantically valid.
+        if _prev_mh_index != -1 and entry.mh_index <= _prev_mh_index:
+            last_note_per_string.clear()
+        _prev_mh_index = entry.mh_index
         measure = track.measures[entry.mh_index]
         for voice in measure.voices:
             for beat in voice.beats:
@@ -643,6 +655,13 @@ def convert_track(
                         continue
 
                     rs_str = _gp_string_to_rs(note.string, num_strings)
+
+                    if note.type == guitarpro.NoteType.tie:
+                        prev = last_note_per_string.get(rs_str)
+                        if prev is not None and prev.time < t:
+                            prev.sustain = max(prev.sustain, (t + dur) - prev.time)
+                        continue
+
                     fret = note.value
                     if note.type == guitarpro.NoteType.dead:
                         fret = max(fret, 0)
@@ -692,6 +711,9 @@ def convert_track(
                         rn.tremolo = True
 
                     beat_notes.append(rn)
+                    existing = last_note_per_string.get(rs_str)
+                    if existing is None or rn.time >= existing.time:
+                        last_note_per_string[rs_str] = rn
 
                 if not beat_notes:
                     continue
@@ -1163,8 +1185,20 @@ def convert_piano_track(
     rs_chords = []
     chord_templates: list[ChordTemplate] = []
     chord_template_map: dict[tuple, int] = {}
+    last_note_per_pitch: dict[tuple[int, int], RsNote] = {}  # (rs_string, rs_fret) → note, for tie sustain extension
+    _prev_mh_index: int = -1  # sentinel: no previous entry
 
     for entry in schedule:
+        # Clear the tie-tracking state on backward jumps in the playback
+        # schedule (repeat loopbacks, D.S., D.C.).  A tie at the start of
+        # a repeated section must not extend the last note from the previous
+        # pass through that section.  Forward skips (volta alternatives,
+        # al-Coda redirects) are *not* cleared because consecutive schedule
+        # entries that jump forward are still adjacent in the output audio,
+        # so a tie crossing such a boundary is semantically valid.
+        if _prev_mh_index != -1 and entry.mh_index <= _prev_mh_index:
+            last_note_per_pitch.clear()
+        _prev_mh_index = entry.mh_index
         measure = track.measures[entry.mh_index]
         for voice in measure.voices:
             for beat in voice.beats:
@@ -1196,6 +1230,12 @@ def convert_piano_track(
                     rs_string = midi_note // 24
                     rs_fret = midi_note % 24
 
+                    if note.type == guitarpro.NoteType.tie:
+                        prev = last_note_per_pitch.get((rs_string, rs_fret))
+                        if prev is not None and prev.time < t:
+                            prev.sustain = max(prev.sustain, (t + dur) - prev.time)
+                        continue
+
                     rn = RsNote(
                         time=t,
                         string=rs_string,
@@ -1210,6 +1250,10 @@ def convert_piano_track(
                         rn.accent = True
 
                     beat_notes.append(rn)
+                    pitch_key = (rs_string, rs_fret)
+                    existing = last_note_per_pitch.get(pitch_key)
+                    if existing is None or rn.time >= existing.time:
+                        last_note_per_pitch[pitch_key] = rn
 
                 if not beat_notes:
                     continue
