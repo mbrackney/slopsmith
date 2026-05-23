@@ -3067,7 +3067,7 @@ window.jucePlayer = jucePlayer;
             }
             window._juceMode = true;
             window._juceAudioUrl = url;
-            const _spSlider = document.getElementById('speed-slider');
+            const _spSlider = document.getElementById?.('speed-slider');
             if (_spSlider) setSpeed(_spSlider.value / 100);
             audio.src = '';
             try {
@@ -3129,7 +3129,7 @@ window.jucePlayer = jucePlayer;
             window._juceAudioUrl = null;
             audio.src = url;
             audio.load();
-            const _spSlider = document.getElementById('speed-slider');
+            const _spSlider = document.getElementById?.('speed-slider');
             if (_spSlider) setSpeed(_spSlider.value / 100);
             // Resume only AFTER the seek so playback starts at `pos`, not at 0
             // with an audible jump once metadata arrives.
