@@ -712,28 +712,31 @@ def _ct_multivoice_song(voices_beats):
 def test_tie_does_not_attach_to_overwritten_earlier_voice_note():
     """Voices are processed sequentially. Without an overwrite guard
     (`rn.time >= existing.time` before updating last_note_per_string),
-    voice 1's beat-0 note would replace voice 0's beat-4 entry in the dict,
-    and voice 1's beat-6 tie would then incorrectly extend voice 1's beat-0
-    sustain across voice 0's beat-4 territory."""
-    # Voice 0: beat 4 fret 7 (t=2.0, sustain 0.5) — populates dict[string=1] first
-    v0_beat4 = _ct_beat(tick=GP_TICKS_PER_QUARTER * 4, dur_value=4,
+    voice 1's beat-0 note would replace voice 0's beat-2 entry in the dict,
+    and voice 1's beat-3 tie would then incorrectly extend voice 1's beat-0
+    sustain across voice 0's beat-2 territory.
+
+    All beat.start values stay within a 4/4 single measure (0 – 3×quarter).
+    """
+    # Voice 0: beat 2 fret 7 (t=1.0, sustain 0.5) — populates dict[string=1] first
+    v0_beat2 = _ct_beat(tick=GP_TICKS_PER_QUARTER * 2, dur_value=4,
                         notes=[_ct_note(guitarpro.NoteType.normal, gp_string=1, fret=7)])
-    # Voice 1: beat 0 fret 5 (t=0) and tie at beat 6 (t=3.0)
+    # Voice 1: beat 0 fret 5 (t=0) and tie at beat 3 (t=1.5)
     v1_beat0 = _ct_beat(tick=0, dur_value=4,
                         notes=[_ct_note(guitarpro.NoteType.normal, gp_string=1, fret=5)])
-    v1_tie = _ct_beat(tick=GP_TICKS_PER_QUARTER * 6, dur_value=4,
+    v1_tie = _ct_beat(tick=GP_TICKS_PER_QUARTER * 3, dur_value=4,
                       notes=[_ct_note(guitarpro.NoteType.tie, gp_string=1, fret=0)])
 
-    xml_str = convert_track(_ct_multivoice_song([[v0_beat4], [v1_beat0, v1_tie]]),
+    xml_str = convert_track(_ct_multivoice_song([[v0_beat2], [v1_beat0, v1_tie]]),
                             track_index=0)
     root = ET.fromstring(xml_str)
     notes = root.findall(".//notes/note")
 
     sustains = {n.get("fret"): float(n.get("sustain")) for n in notes}
     # Voice 1's beat-0 (fret 5) sustain must stay at its own duration (~0.5 s).
-    # Without the overwrite guard it would be inflated to ~3.5 s by the tie.
+    # Without the overwrite guard it would be inflated to ~2.0 s by the tie.
     assert sustains.get("5") == pytest.approx(0.5, abs=0.01), \
-        "overwrite guard must keep voice 0's beat-4 as the tracked predecessor; " \
+        "overwrite guard must keep voice 0's beat-2 as the tracked predecessor; " \
         "voice 1's beat-0 sustain must not balloon to cover the tie's target time"
 
 
