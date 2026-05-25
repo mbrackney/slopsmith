@@ -4484,6 +4484,7 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
         # Send lyrics if available
         import xml.etree.ElementTree as ET
         lyrics = []
+        lyrics_source = ""
         # Loose folders are flat — only inspect direct children so a
         # nested backup/export directory inside the song folder can't
         # override the active arrangement's lyrics / tone. PSARCs are
@@ -4494,18 +4495,33 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
         _json_walk = Path(tmp).glob if is_loose else Path(tmp).rglob
         if is_slop:
             lyrics = list(song.lyrics or [])
+            lyrics_source = getattr(song, "lyrics_source", "") or ""
         else:
             for xml_path in sorted(_xml_walk("*.xml")):
                 try:
                     root = ET.parse(xml_path).getroot()
                     if root.tag == "vocals":
-                        for v in root.findall("vocal"):
-                            lyrics.append({
+                        # Some official DLC ships an empty <vocals/> shell
+                        # alongside the real SNG, so only stop scanning
+                        # when the XML actually produced lyric tokens.
+                        # An empty shell here would otherwise short-circuit
+                        # later XML files (and the SNG fallback below
+                        # checks `if not lyrics:` so it would still try,
+                        # but a meaningful XML further down the rglob
+                        # would be missed). Mirrors the lib helper at
+                        # lib/sloppak_convert.py:_parse_lyrics_with_source.
+                        candidate = [
+                            {
                                 "t": round(float(v.get("time", "0")), 3),
                                 "d": round(float(v.get("length", "0")), 3),
                                 "w": v.get("lyric", ""),
-                            })
-                        break
+                            }
+                            for v in root.findall("vocal")
+                        ]
+                        if candidate:
+                            lyrics = candidate
+                            lyrics_source = "xml"
+                            break
                 except Exception:
                     pass
             if not lyrics:
@@ -4521,11 +4537,15 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
                         except Exception:
                             lyrics = []
                         if lyrics:
+                            lyrics_source = "sng"
                             break
                 except ImportError:
                     pass
         if lyrics:
-            await websocket.send_json({"type": "lyrics", "data": lyrics})
+            payload = {"type": "lyrics", "data": lyrics}
+            if lyrics_source:
+                payload["source"] = lyrics_source
+            await websocket.send_json(payload)
 
         # Send tone changes. PSARC and loose folders carry tone data in
         # arrangement XMLs; a sloppak ships it inline in its arrangement JSON

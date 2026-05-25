@@ -79,6 +79,8 @@ Full set of currently-recognized top-level keys:
 | `arrangements` | list | yes | Playable arrangements (see §2.1) |
 | `stems` | list | yes | Audio stems (see §2.2) |
 | `lyrics` | string | no | Path to lyrics JSON |
+| `lyrics_source` | string | no | Where the lyrics came from: `xml` (Rocksmith vocals.xml), `sng` (encrypted Rocksmith vocals.sng), `whisperx` (auto-transcribed), or `user` (hand-edited). Absent on legacy sloppaks — readers should treat missing as `xml` |
+| `lyric_transcription` | object | no | Structured metadata when lyrics came from an automated engine (currently `whisperx`). Same shape as the parent `stem_separation` block defined by [slopsmith#357](https://github.com/byrongamatos/slopsmith/issues/357) — see §2.3 for fields and semver semantics. Omitted for authored lyrics (`xml`/`sng`/`user`) |
 | `cover` | string | no | Path to cover image |
 
 Unknown keys are **silently ignored** by the loader. This is deliberate — it's the extensibility hook (see §5).
@@ -136,6 +138,24 @@ If present, points at a JSON file containing a flat list of syllable objects:
 | `t` | Time in seconds |
 | `d` | Duration in seconds |
 | `w` | Syllable text. Trailing `-` joins to the next syllable as one word; trailing `+` marks the last syllable of a line (renderer wraps after it). Both are suffixes on a real syllable — not standalone entries. See `static/highway.js` for the rendering: `raw.endsWith('+')` flags end-of-line, and `sylText` strips the trailing marker before drawing |
+
+When lyrics are present, the optional top-level `lyrics_source` key records where they came from. The PSARC→sloppak converter sets it to `xml` or `sng` based on which Rocksmith source it parsed; the WhisperX auto-transcription fallback (`scripts/transcribe_lyrics.py`, or `--auto-lyrics` on the convert / split scripts) sets it to `whisperx`. Hand-edited lyrics should bump it to `user` so UI consumers can render a different badge (or no badge) than for machine-generated lyrics. The key is absent on sloppaks produced before this field existed — readers should treat missing as `xml` for backward compatibility.
+
+When `lyrics_source` is `whisperx` (or any future automated engine), an optional `lyric_transcription` block records which engine + model produced the file. Shape mirrors the parent `stem_separation` RFC ([slopsmith#357](https://github.com/byrongamatos/slopsmith/issues/357)):
+
+```yaml
+lyric_transcription:
+  engine: whisperx     # stable engine id
+  model: medium        # the WhisperX model size that ran (tiny/base/small/medium/large-v2/large-v3)
+  version: 1.0.0       # semver for slopsmith's lyric-transcription artifact contract
+```
+
+Fields:
+- `engine` — stable identifier for the transcription engine; currently always `whisperx`.
+- `model` — the engine-specific model id used for this transcription.
+- `version` — semver for Slopsmith's lyric-transcription artifact contract (independent of upstream Whisper / WhisperX versions). Bump per the same semantics #357 defines for stems: patch = metadata-only fixes, minor = backward-compatible additions, major = output shape changed and existing transcriptions should be regenerated.
+
+Omitted for authored lyrics (`xml` / `sng` / `user`). A remote WhisperX server can use this block as part of a cache key the same way #357 envisions for stems — caches should miss whenever any of the three fields change, ensuring stale transcriptions don't get returned after a model bump.
 
 ---
 

@@ -98,6 +98,12 @@ function createHighway() {
     // 7+ = extended-range GP imports.
     let stringCount = 6;
     let lyrics = [];
+    // Provenance of the active lyric set. Set from the highway WS `lyrics`
+    // message's `source` field; empty when no lyrics have arrived yet or the
+    // source produced lyrics without provenance (e.g. legacy GP imports).
+    // Exposed via the bundle + getLyricsSource() so plugins can render an
+    // "auto-transcribed" badge for whisperx-sourced lyrics.
+    let lyricsSource = "";
     let toneChanges = [];
     let toneBase = "";
     // Drum-tab payload (sloppak-spec §5.3). When the active sloppak's
@@ -460,6 +466,7 @@ function createHighway() {
             tuning: songInfo?.tuning,
             capo: songInfo?.capo,
             lyrics,
+            lyricsSource,
             toneChanges,
             toneBase,
             // Drum tab payload (or null when the active arrangement has
@@ -2245,7 +2252,7 @@ function createHighway() {
             _resizeHandler = () => this.resize();
             window.addEventListener('resize', _resizeHandler);
             ready = false;
-            notes = []; chords = []; handShapes = []; beats = []; sections = []; anchors = []; chordTemplates = []; lyrics = []; toneChanges = []; toneBase = ""; drumTab = null;
+            notes = []; chords = []; handShapes = []; beats = []; sections = []; anchors = []; chordTemplates = []; lyrics = []; lyricsSource = ""; toneChanges = []; toneBase = ""; drumTab = null;
             stringCount = 6;  // default until song_info arrives
             // Reset phrase ladder + filter (slopsmith#48). _mastery
             // persists across arrangement switches — the slider's
@@ -2692,7 +2699,15 @@ function createHighway() {
                             }
                             break;
                         case 'chord_templates': chordTemplates = msg.data; break;
-                        case 'lyrics': lyrics = msg.data; break;
+                        case 'lyrics':
+                            lyrics = msg.data;
+                            // Provenance: "xml" | "sng" | "whisperx" | "user".
+                            // Surfaced via the renderer bundle so visualization
+                            // plugins can render an "auto-transcribed" badge
+                            // (or any other source-dependent UI) without
+                            // having to hook the raw WS themselves.
+                            lyricsSource = msg.source || "";
+                            break;
                         case 'tone_changes': toneChanges = msg.data; toneBase = msg.base || ""; break;
                         case 'notes': notes = notes.concat(msg.data); break;
                         case 'chords': chords = chords.concat(msg.data); break;
@@ -2958,6 +2973,10 @@ function createHighway() {
         },
 
         getLyricsVisible() { return showLyrics; },
+        // Provenance of the active lyric set. See `lyricsSource` declaration
+        // for the full enum. Plugins consume this to badge auto-transcribed
+        // (whisperx) lyrics differently from authored (xml/sng/user) ones.
+        getLyricsSource() { return lyricsSource; },
         setLyricsVisible(v) {
             showLyrics = !!v;
             if (_onLyricsChange) _onLyricsChange(showLyrics);
@@ -2968,7 +2987,7 @@ function createHighway() {
             // Close old WS but keep audio + animation running
             if (ws) { ws.close(); ws = null; }
             ready = false;
-            notes = []; chords = []; handShapes = []; beats = []; sections = []; anchors = []; chordTemplates = []; lyrics = []; toneChanges = []; toneBase = ""; drumTab = null;
+            notes = []; chords = []; handShapes = []; beats = []; sections = []; anchors = []; chordTemplates = []; lyrics = []; lyricsSource = ""; toneChanges = []; toneBase = ""; drumTab = null;
             stringCount = 6;  // default until song_info arrives
             // Drop any per-song offset from the previous load so setTime
             // calls that fire before the next song_info arrives don't
