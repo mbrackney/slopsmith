@@ -3834,9 +3834,14 @@ function setSpeed(v) {
     }
     if (window._juceMode) {
         window.jucePlayer?.setRate(rate);
+        const juceAudio = window.slopsmithDesktop?.audio;
         Promise.resolve()
-            .then(() => window.slopsmithDesktop?.audio?.setBackingSpeed(rate))
-            .catch(err => console.warn('[setSpeed] setBackingSpeed failed:', err));
+            .then(() => juceAudio?.setBackingSpeed(rate))
+            // Match the HTML5 path: preserve pitch on the JUCE backing track too.
+            // Optional-chained call is a no-op on desktop builds that predate
+            // setBackingPreservePitch, so this is safe to ship unconditionally.
+            .then(() => juceAudio?.setBackingPreservePitch?.(true))
+            .catch(err => console.warn('[setSpeed] backing speed/preserve-pitch failed:', err));
     } else {
         audio.playbackRate = rate;
     }
