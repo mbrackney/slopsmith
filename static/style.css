@@ -37,7 +37,6 @@ html { scroll-behavior: smooth; }
 .button-icon-svg {
     width: 14px;
     height: 14px;
-    fill: white;
     vertical-align: middle;
     display: inline-block;
 }
