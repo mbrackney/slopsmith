@@ -870,18 +870,25 @@ def _existing_lyrics_path(source_dir: Path) -> Path | None:
     the `lyrics` key against `source_dir` with the same
     relative-to(source_dir) safety check the sloppak loader uses
     (lib/sloppak.py), and returns the path only when the file
-    actually exists on disk and looks like a lyrics JSON.
+    actually exists on disk and has a `.json` suffix.
 
-    Requires the resolved path to be a regular file with a `.json`
-    suffix — a manifest that points at a directory or a non-JSON
-    file is a broken manifest, and we'd rather let the transcribe
-    fallback fix it than treat the broken value as authoritative
-    "lyrics already present" and refuse to run.
+    Checks are deliberately surface-level: regular file + `.json`
+    extension only. The function does NOT parse the JSON or validate
+    that it contains the expected list-of-syllables shape — that
+    validation lives in the sloppak loader and would double the cost
+    of the gate (read + parse) for no win. A `.json` file that turns
+    out to be malformed at load time is the loader's problem; for
+    the transcribe gate's purposes, the presence of *any* manifest-
+    declared JSON is enough to defer to the user instead of silently
+    overwriting it. A manifest that points at a directory or a
+    non-JSON file is a broken manifest — return None so the
+    transcribe fallback can fix it rather than treating the broken
+    value as authoritative "lyrics already present".
 
     Returns None on any failure mode — no manifest, malformed YAML,
-    traversal attempt, missing key, missing file, wrong type. Caller
-    treats None as "no usable existing lyrics — fallback path may
-    run"."""
+    traversal attempt, missing key, missing file, non-file, wrong
+    suffix. Caller treats None as "no usable existing lyrics —
+    fallback path may run"."""
     mf = source_dir / "manifest.yaml"
     if not mf.exists():
         mf = source_dir / "manifest.yml"
@@ -1395,17 +1402,38 @@ def _transcribe_existing_in_dir(
         previous_lyrics_bytes = existing_lyrics_path.read_bytes()
         previous_lyrics_target = existing_lyrics_path
         existing_lyrics_path.unlink(missing_ok=True)
+    # Snapshot the canonical `lyrics.json` BEFORE the split so we can
+    # detect whether transcription actually wrote it (vs an unrelated
+    # file with the same name that happened to predate this run).
+    # Bare existence-after isn't enough: a sloppak whose manifest
+    # points at `karaoke/lyrics.json` could also have a stale
+    # `lyrics.json` sitting at the root that the manifest didn't
+    # reference — finding it after the split would falsely report
+    # success and skip the restore of the manifest-declared file we
+    # just unlinked. (mtime_ns + size is sufficient here: the split
+    # step runs Demucs which takes minutes, so even coarse FS mtime
+    # resolution distinguishes pre and post; a real rewrite changes
+    # both fields.)
+    def _snapshot(p: Path) -> tuple[int, int] | None:
+        try:
+            st = p.stat()
+            return (st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            return None
+    pre_snapshot = _snapshot(new_lyrics_path)
     try:
         _split_in_dir(source_dir, model, progress_cb, base_frac, span_frac,
                       transcribe_lyrics=True)
     finally:
-        # Snapshot whether a *new* lyrics.json landed BEFORE we touch the
-        # restore path. Returning existence after restoring the old bytes
-        # would falsely report success — the file exists, but only
-        # because we put it back — and the caller (zip-form
-        # transcribe_existing_sloppak) would then repack the sloppak for
-        # no reason.
-        wrote_new = new_lyrics_path.exists()
+        # `wrote_new` is true only when the file's pre/post snapshot
+        # actually differs — caught a fresh write — OR the file didn't
+        # exist before but does now. Either way, transcription
+        # contributed something to disk. Same-snapshot means the
+        # transcription was skipped/gated/failed; we restore the
+        # manifest-declared backup so the user doesn't lose their
+        # existing lyrics.
+        post_snapshot = _snapshot(new_lyrics_path)
+        wrote_new = post_snapshot is not None and post_snapshot != pre_snapshot
         if previous_lyrics_bytes is not None and previous_lyrics_target is not None and not wrote_new:
             previous_lyrics_target.write_bytes(previous_lyrics_bytes)
     return wrote_new
