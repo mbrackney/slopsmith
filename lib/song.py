@@ -32,6 +32,12 @@ class Note:
     accent: bool = False
     link_next: bool = False
     tap: bool = False
+    fret_hand_mute: bool = False
+    pluck: bool = False
+    slap: bool = False
+    right_hand: int = -1
+    pick_direction: int = -1
+    ignore: bool = False
 
 
 @dataclass
@@ -161,7 +167,15 @@ class Song:
 # arrangement file format — see `arrangements/*.json` inside a sloppak.
 
 def note_to_wire(n: Note) -> dict:
-    return {
+    # The pre-existing technique keys (ho/po/hm/hp/pm/mt/vb/tr/ac/tp) keep
+    # being emitted unconditionally to preserve the legacy wire-format
+    # contract — older consumers may assume those keys exist. The new
+    # techniques (ln/fhm/plk/slp/rh/pkd/ig) are introduced default-omitted
+    # so the highway's per-note WebSocket payload doesn't inflate for the
+    # common case where they're unset. `note_from_wire` decodes missing
+    # keys to their dataclass defaults, matching the sloppak spec
+    # ("Omit fields equal to their default …").
+    out = {
         "t": round(n.time, 3), "s": n.string, "f": n.fret,
         "sus": round(n.sustain, 3),
         "sl": n.slide_to, "slu": n.slide_unpitch_to,
@@ -172,6 +186,21 @@ def note_to_wire(n: Note) -> dict:
         "vb": n.vibrato,
         "tr": n.tremolo, "ac": n.accent, "tp": n.tap,
     }
+    if n.link_next:
+        out["ln"] = True
+    if n.fret_hand_mute:
+        out["fhm"] = True
+    if n.pluck:
+        out["plk"] = True
+    if n.slap:
+        out["slp"] = True
+    if n.right_hand != -1:
+        out["rh"] = n.right_hand
+    if n.pick_direction != -1:
+        out["pkd"] = n.pick_direction
+    if n.ignore:
+        out["ig"] = True
+    return out
 
 
 def chord_note_to_wire(cn: Note) -> dict:
@@ -218,6 +247,21 @@ def chord_template_to_wire(ct: ChordTemplate) -> dict:
     }
 
 
+def _wire_int_optional(v, default=-1):
+    """Parse optional wire ints; fall back to default on null/blank/invalid."""
+    if v is None:
+        return default
+    if isinstance(v, str) and not v.strip():
+        return default
+    try:
+        return int(v)
+    except (ValueError, TypeError, OverflowError):
+        try:
+            return int(float(v))
+        except (ValueError, TypeError, OverflowError):
+            return default
+
+
 def note_from_wire(d: dict, time: float | None = None) -> Note:
     return Note(
         time=float(d.get("t", time if time is not None else 0.0)),
@@ -237,6 +281,15 @@ def note_from_wire(d: dict, time: float | None = None) -> Note:
         tremolo=bool(d.get("tr", False)),
         accent=bool(d.get("ac", False)),
         tap=bool(d.get("tp", False)),
+        link_next=bool(d.get("ln", False)),
+        fret_hand_mute=bool(d.get("fhm", False)),
+        pluck=bool(d.get("plk", False)),
+        slap=bool(d.get("slp", False)),
+        # Optional integer metadata — graceful-fallback decode, matching
+        # the XML side's `_int_optional`.
+        right_hand=_wire_int_optional(d.get("rh"), -1),
+        pick_direction=_wire_int_optional(d.get("pkd"), -1),
+        ignore=bool(d.get("ig", False)),
     )
 
 
@@ -462,6 +515,29 @@ def _int(elem, attr, default=0):
         return int(float(v))
 
 
+def _int_optional(elem, attr, default=-1):
+    """Graceful-fallback integer reader for *optional* XML attributes.
+
+    Use for fields that are merely metadata hints (right-hand fingering,
+    pick direction, etc.) where a malformed value from a third-party
+    Rocksmith XML emitter shouldn't abort the whole arrangement parse.
+
+    Required-field readers (`string`, `fret`, `chordId`, …) keep using
+    `_int` so a corrupted required attribute still fails fast at parse
+    time rather than silently defaulting to a wrong index.
+    """
+    v = elem.get(attr)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return default
+    try:
+        return int(v)
+    except (ValueError, TypeError, OverflowError):
+        try:
+            return int(float(v))
+        except (ValueError, TypeError, OverflowError):
+            return default
+
+
 _FALSE_LITERALS = frozenset({"", "0", "false", "False", "FALSE"})
 
 
@@ -519,6 +595,12 @@ def _parse_note(n) -> Note:
         accent=_bool(n, "accent"),
         link_next=_bool(n, "linkNext"),
         tap=_bool(n, "tap"),
+        fret_hand_mute=_bool(n, "fretHandMute"),
+        pluck=_bool(n, "pluck"),
+        slap=_bool(n, "slap"),
+        right_hand=_int_optional(n, "rightHand", -1),
+        pick_direction=_int_optional(n, "pickDirection", -1),
+        ignore=_bool(n, "ignore"),
     )
 
 

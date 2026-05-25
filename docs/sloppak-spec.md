@@ -191,11 +191,18 @@ Field names are short on purpose — these get streamed thousands of times per s
   "vb": false,    // vibrato
   "tr": false,    // tremolo
   "ac": false,    // accent
-  "tp": false     // tap
+  "tp": false,    // tap
+  "ln": false,    // link-next (chord linking metadata; renderers may ignore — runtime linking is derived from proximity)
+  "fhm": false,   // fret-hand mute
+  "plk": false,   // pluck (pop, bass)
+  "slp": false,   // slap (bass)
+  "rh": -1,       // right-hand fingering (-1 = unset)
+  "pkd": -1,      // pick direction (-1 = unset, 0 = down, 1 = up)
+  "ig": false     // ignore (chart-author flag — note is rendered but not scored / sequenced)
 }
 ```
 
-Default values: numbers → `0` or `-1` (slides), bools → `false`. Omit fields equal to their default if you're authoring by hand — the parser fills them in.
+Default values: numbers → `0` or `-1` (slides / `rh` / `pkd`), bools → `false`. Omit fields equal to their default if you're authoring by hand — the parser fills them in. **Encoders should default-omit the newer technique keys** (`ln`, `fhm`, `plk`, `slp`, `rh`, `pkd`, `ig`) — the highway streams notes thousands of times per song, so trimming the common case keeps the WebSocket payload tight. The pre-existing keys are still emitted unconditionally to preserve the legacy wire contract.
 
 ### 3.3. Chords
 
