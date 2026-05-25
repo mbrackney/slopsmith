@@ -1087,8 +1087,12 @@ def _maybe_transcribe_lyrics(
         # Re-scale the transcriber's 0..1 progress into the LYRIC
         # sub-portion of our slice — so the lyric phase tops out at
         # base + _lyric_span and the pitch phase has room to advance
-        # the bar further without it visibly moving backwards.
-        _progress(progress_cb, base_frac + _lyric_span * (0.10 + 0.80 * frac), stage, msg)
+        # the bar further without it visibly moving backwards. Clamp
+        # the input so a transcriber that overshoots (e.g. emits >1.0
+        # on a "post-processing" stage) can't punch through the lyric
+        # boundary and force a backward step on the pitch hand-off.
+        clamped = max(0.0, min(1.0, frac))
+        _progress(progress_cb, base_frac + _lyric_span * (0.10 + 0.80 * clamped), stage, msg)
 
     try:
         if server_url:
