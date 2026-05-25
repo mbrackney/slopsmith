@@ -3,12 +3,23 @@ window.slopsmithDemoTrack = window.slopsmithDemoTrack ?? null;
 
 // Sync the play/pause button's icon and accessible state in one place so
 // screen readers, tooltips, and aria-pressed stay aligned with playback.
+// Updates the existing <img> child's src in place rather than rewriting
+// innerHTML, so any future children (fallback label, loading spinner, …)
+// survive state changes.
 function setPlayButtonState(isPlaying) {
     const btn = document.getElementById('btn-play');
     if (!btn) return;
     const label = isPlaying ? 'Pause' : 'Play';
     const icon = isPlaying ? 'pause' : 'play';
-    btn.innerHTML = `<img src="/static/svg/${icon}.svg" class="button-icon-svg" alt="" aria-hidden="true" />`;
+    let img = btn.querySelector('img.button-icon-svg');
+    if (!img) {
+        img = document.createElement('img');
+        img.className = 'button-icon-svg';
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+        btn.appendChild(img);
+    }
+    img.src = `/static/svg/${icon}.svg`;
     btn.setAttribute('aria-label', label);
     btn.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
     btn.title = label;
