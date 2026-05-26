@@ -112,6 +112,15 @@ def extract_pitch_remote(
     # past the docstring contract.
     log.debug("POST %s/pitch vocals=%s lyrics=%d timeout=%ds",
               server_url, vocals_path.name, len(lyrics), timeout)
+    # Catch both `requests.RequestException` (network / DNS / timeout /
+    # upload aborted) AND `OSError` from the `open(vocals_path)` itself
+    # (file disappeared between gate-check and upload, permissions
+    # change, EIO). Both surface as `RuntimeError` to keep the
+    # docstring contract one-type and let the caller handle every
+    # failure mode with one `except`. RequestException MUST be caught
+    # first because it inherits from OSError — listing OSError first
+    # would steal the network-failure path and label it as a vocals
+    # read error.
     try:
         with open(vocals_path, "rb") as f:
             resp = requests.post(
@@ -123,6 +132,8 @@ def extract_pitch_remote(
             )
     except requests.RequestException as e:
         raise RuntimeError(f"CREPE server request failed: {e}") from e
+    except OSError as e:
+        raise RuntimeError(f"Reading vocals stem {vocals_path.name} failed: {e}") from e
 
     if resp.status_code != 200:
         raise RuntimeError(

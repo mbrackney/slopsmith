@@ -103,6 +103,16 @@ def test_extract_pitch_remote_wraps_request_exception_as_runtimeerror(tmp_path, 
         extract_pitch_remote(vocals, [{"t": 0, "d": 0.1, "w": "x"}], "http://server:7865")
 
 
+def test_extract_pitch_remote_wraps_oserror_as_runtimeerror(tmp_path):
+    # Vocals file deliberately missing — open() raises FileNotFoundError
+    # (an OSError subclass) which must surface as RuntimeError per the
+    # docstring contract, not leak the raw OSError. Mirrors the
+    # network-error wrapping above.
+    vocals = tmp_path / "does_not_exist.ogg"
+    with pytest.raises(RuntimeError, match="Reading vocals stem.*does_not_exist.ogg failed"):
+        extract_pitch_remote(vocals, [{"t": 0, "d": 0.1, "w": "x"}], "http://server:7865")
+
+
 def test_extract_pitch_remote_raises_on_non_200(tmp_path, monkeypatch):
     vocals = tmp_path / "vocals.ogg"
     vocals.write_bytes(b"")

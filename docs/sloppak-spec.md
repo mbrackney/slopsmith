@@ -582,12 +582,17 @@ keys: keys.json
 
 Each entry implicitly applies until the next event. Same model as `sections[]`.
 
-#### Vocal pitch contour
+#### Vocal pitch contour (a different shape, a different key)
 
-If you want a vocal-pitch overlay separate from the lyrics karaoke layer:
+The canonical `vocal_pitch` key + file (defined in §2.4) is the
+per-syllable note format consumed by the karaoke plugin —
+`{version: 1, notes: [{t, d, midi}]}`. If you want to ship a finer-
+grained pitch *contour* (one sample every 20 ms, Hz instead of MIDI),
+that's a different shape and should ride on its own manifest key so
+the two don't collide:
 
 ```yaml
-vocal_pitch: vocal_pitch.json
+vocal_pitch_contour: vocal_pitch_contour.json
 ```
 
 ```json
@@ -600,17 +605,8 @@ vocal_pitch: vocal_pitch.json
 }
 ```
 
-Or — if your data comes as windows of sustained notes — use the same shape as Rocksmith's `vocals.xml`:
-
-```json
-{
-  "version": 1,
-  "notes": [
-    {"t": 12.34, "d": 0.4, "midi": 64},
-    {"t": 12.74, "d": 0.6, "midi": 67}
-  ]
-}
-```
+Per §5.1, manifest keys are cheap — reach for a new one when the
+schema diverges, don't overload an existing key with a second shape.
 
 ### 5.4. `version` field — always include it
 

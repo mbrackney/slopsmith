@@ -817,6 +817,85 @@ def test_maybe_extract_pitch_writes_file_and_manifest(tmp_path, monkeypatch):
     }
 
 
+def test_load_lyrics_for_pitch_accepts_minimal_shape(tmp_path):
+    p = tmp_path / "lyrics.json"
+    p.write_text(_json.dumps([
+        {"t": 0.0, "d": 0.5, "w": "hi"},
+        {"t": 1.0, "d": 0.3, "w": "world"},
+    ]), encoding="utf-8")
+    out = sloppak_convert._load_lyrics_for_pitch(p)
+    assert out == [
+        {"t": 0.0, "d": 0.5, "w": "hi"},
+        {"t": 1.0, "d": 0.3, "w": "world"},
+    ]
+
+
+def test_load_lyrics_for_pitch_returns_none_on_missing_file(tmp_path):
+    assert sloppak_convert._load_lyrics_for_pitch(tmp_path / "nope.json") is None
+
+
+def test_load_lyrics_for_pitch_returns_none_on_malformed_json(tmp_path):
+    p = tmp_path / "lyrics.json"
+    p.write_text("{not json", encoding="utf-8")
+    assert sloppak_convert._load_lyrics_for_pitch(p) is None
+
+
+def test_load_lyrics_for_pitch_filters_entries_missing_t_or_d(tmp_path):
+    p = tmp_path / "lyrics.json"
+    p.write_text(_json.dumps([
+        {"t": 0.0, "d": 0.5, "w": "ok"},
+        {"t": 1.0, "w": "missing-d"},      # filtered
+        {"d": 0.2, "w": "missing-t"},      # filtered
+        "not-a-dict",                      # filtered
+    ]), encoding="utf-8")
+    out = sloppak_convert._load_lyrics_for_pitch(p)
+    assert out == [{"t": 0.0, "d": 0.5, "w": "ok"}]
+
+
+def test_load_lyrics_for_pitch_returns_none_when_all_entries_filtered(tmp_path):
+    p = tmp_path / "lyrics.json"
+    p.write_text(_json.dumps([{"w": "no-times"}]), encoding="utf-8")
+    assert sloppak_convert._load_lyrics_for_pitch(p) is None
+
+
+def test_maybe_transcribe_lyrics_runs_pitch_when_lyrics_already_exist(tmp_path, monkeypatch):
+    """When a sloppak ships with lyrics (PSARC xml/sng or hand-authored),
+    WhisperX skips — but the pitch path should STILL run since the
+    karaoke pitch pre-condition (lyrics + vocals + server) is met."""
+    src = _make_sloppak_with_vocals(tmp_path)
+    # Add an existing lyrics file declared by the manifest.
+    existing = src / "lyrics.json"
+    existing.write_text(
+        _json.dumps([{"t": 0.0, "d": 0.5, "w": "ohai"}]), encoding="utf-8"
+    )
+    mf = _yaml.safe_load((src / "manifest.yaml").read_text(encoding="utf-8"))
+    mf["lyrics"] = "lyrics.json"
+    (src / "manifest.yaml").write_text(_yaml.safe_dump(mf), encoding="utf-8")
+
+    _patch_pitch_config(monkeypatch)
+    # Capture the lyrics arg that pitch receives so we can confirm it
+    # got the existing-on-disk lyrics, not an empty list or something.
+    received = {}
+    import vocal_pitch
+    def _stub(*args, **kwargs):
+        # args = (vocals_path, lyrics, server_url); we capture lyrics.
+        received["lyrics"] = args[1]
+        return [{"t": 0.0, "d": 0.5, "midi": 64}]
+    monkeypatch.setattr(vocal_pitch, "extract_pitch_remote", _stub)
+
+    out = sloppak_convert._maybe_transcribe_lyrics(
+        src,
+        [{"id": "vocals", "file": "stems/vocals.ogg"}],
+        enabled=True,
+    )
+    # Transcription itself did NOT run — the function returns False.
+    assert out is False
+    # But pitch DID run, with the on-disk lyrics.
+    assert received.get("lyrics") == [{"t": 0.0, "d": 0.5, "w": "ohai"}]
+    # And vocal_pitch.json got written.
+    assert (src / "vocal_pitch.json").exists()
+
+
 def test_maybe_extract_pitch_emits_progress_within_slice(tmp_path, monkeypatch):
     src = _make_sloppak_with_vocals(tmp_path)
     _patch_pitch_config(monkeypatch)

@@ -986,6 +986,37 @@ def _rewrite_lyrics_manifest(
     )
 
 
+def _load_lyrics_for_pitch(lyrics_path: Path) -> list[dict] | None:
+    """Load an existing lyrics JSON for pitch extraction's purposes.
+
+    The pitch endpoint only needs each entry's `t` + `d`; the rest of
+    the lyrics shape (word text, formatting hints, etc.) is forwarded
+    unchanged but ignored server-side. So this loader's bar is low:
+    return a list of dicts that each have `t` + `d`. Any other shape
+    (missing fields, top-level non-list, malformed JSON, IO error)
+    returns None so the caller skips the pitch hand-off rather than
+    crashing the surrounding transcription pass.
+
+    NOT a manifest reader — caller has already resolved the path via
+    `_existing_lyrics_path`. NOT a general lyrics validator — the
+    sloppak loader owns shape validation for read-time use."""
+    try:
+        raw = json.loads(lyrics_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        log.debug("_load_lyrics_for_pitch: %s read/parse failed: %s", lyrics_path, e)
+        return None
+    if not isinstance(raw, list):
+        return None
+    out: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if "t" not in entry or "d" not in entry:
+            continue
+        out.append(entry)
+    return out or None
+
+
 def _maybe_transcribe_lyrics(
     source_dir: Path,
     produced_stems: list[dict],
@@ -1052,9 +1083,27 @@ def _maybe_transcribe_lyrics(
     # Checking only `source_dir / "lyrics.json"` would silently
     # overwrite an existing entry at a different location and leave
     # the manifest pointing at a new file we just wrote.
-    if not force and _existing_lyrics_path(source_dir) is not None:
+    existing_lyrics_path = (None if force else _existing_lyrics_path(source_dir))
+    if existing_lyrics_path is not None:
         log.info("_maybe_transcribe_lyrics: %s already has lyrics, skipping (use force=True to override)",
                  source_dir.name)
+        # Existing lyrics + a vocals stem + a configured server still
+        # satisfy the karaoke pitch pre-condition, even though we're
+        # not transcribing here. Load the on-disk lyrics and run pitch
+        # so sloppaks whose lyrics came from PSARC xml/sng (or were
+        # hand-authored) also get pre-generated karaoke pitch — not
+        # just the WhisperX-transcribed ones.
+        existing_lyrics = _load_lyrics_for_pitch(existing_lyrics_path)
+        if existing_lyrics:
+            _maybe_extract_pitch(
+                source_dir, existing_lyrics, vocals_path,
+                progress_cb=progress_cb,
+                base_frac=base_frac,
+                span_frac=span_frac,
+            )
+            # _maybe_extract_pitch flushes to base_frac + span_frac on
+            # every exit path, so we don't need an additional _skip flush.
+            return False
         return _skip("Lyrics already present")
 
     cfg = _get_whisperx_config()
