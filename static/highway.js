@@ -2474,8 +2474,15 @@ function createHighway() {
                             } else {
                                 document.getElementById('hud-artist').textContent = msg.artist;
                                 document.getElementById('hud-title').textContent = msg.title;
-                                let namingMode = 'smart';
-                                try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) {}
+                                // Prefer the server-echoed naming_mode (resolved from
+                                // the WS query param) so the HUD stays consistent with
+                                // app.js's in-memory cache even when localStorage is
+                                // unavailable. Fall back to localStorage for older
+                                // backends that don't echo it yet.
+                                let namingMode = msg.naming_mode;
+                                if (namingMode !== 'smart' && namingMode !== 'legacy') {
+                                    try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) { namingMode = 'smart'; }
+                                }
                                 const arrLabel = (namingMode === 'smart' && msg.arrangement_smart_name)
                                     ? msg.arrangement_smart_name
                                     : msg.arrangement;
@@ -2655,8 +2662,11 @@ function createHighway() {
                                 // Populate arrangement dropdown
                                 if (msg.arrangements) {
                                     const sel = document.getElementById('arr-select');
-                                    let namingMode = 'smart';
-                                    try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) {}
+                                    // Server-echoed naming_mode preferred; see HUD branch above.
+                                    let namingMode = msg.naming_mode;
+                                    if (namingMode !== 'smart' && namingMode !== 'legacy') {
+                                        try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) { namingMode = 'smart'; }
+                                    }
                                     sel.textContent = '';
                                     for (const a of msg.arrangements) {
                                         const displayName = (namingMode === 'smart' && a.smart_name) ? a.smart_name : a.name;

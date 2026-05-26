@@ -1845,13 +1845,16 @@ def _background_scan():
         if not cached:
             to_scan.append((f, mtime, size))
         elif cached.get("arrangements") and any(
-            "smart_name" not in a or a.get("smart_name") is None
-            for a in cached["arrangements"]
+            "smart_name" not in a for a in cached["arrangements"]
         ):
-            # Row was scanned before smart naming was introduced, or has an
-            # explicit null smart_name (e.g. duplicate raw names) — force a
+            # Row was scanned before smart naming was introduced — force a
             # rescan so the DB picks up authoritative path flags from the
-            # manifest JSON and stores correct smart_name values.
+            # manifest JSON and stores correct smart_name values. Don't
+            # re-queue rows where smart_name is explicitly null: the writer
+            # only emits that when compute_smart_names truly can't classify
+            # the arrangement (e.g. a name outside the recognised set with
+            # zero path flags), so rescanning would produce the same null
+            # forever and never converge.
             to_scan.append((f, mtime, size))
 
     if not to_scan:
@@ -4753,6 +4756,10 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1,
             "arrangement": arr.name,
             "arrangement_smart_name": smart_names[best],
             "arrangement_index": best,
+            # Echo the resolved naming mode so highway.js doesn't have to
+            # re-read localStorage (which can be unavailable / disagree with
+            # app.js's in-memory cache when storage writes fail).
+            "naming_mode": "smart" if naming_mode == "smart" else "legacy",
             "arrangements": arr_list,
             "audio_url": audio_url,
             "audio_error": audio_error,
