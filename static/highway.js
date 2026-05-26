@@ -2474,7 +2474,8 @@ function createHighway() {
                             } else {
                                 document.getElementById('hud-artist').textContent = msg.artist;
                                 document.getElementById('hud-title').textContent = msg.title;
-                                const namingMode = localStorage.getItem('arrangementNamingMode') ?? 'smart';
+                                let namingMode = 'smart';
+                                try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) {}
                                 const arrLabel = (namingMode === 'smart' && msg.arrangement_smart_name)
                                     ? msg.arrangement_smart_name
                                     : msg.arrangement;
@@ -2654,12 +2655,18 @@ function createHighway() {
                                 // Populate arrangement dropdown
                                 if (msg.arrangements) {
                                     const sel = document.getElementById('arr-select');
-                                    const namingMode = localStorage.getItem('arrangementNamingMode') ?? 'smart';
-                                    sel.innerHTML = msg.arrangements.map(a => {
+                                    let namingMode = 'smart';
+                                    try { namingMode = localStorage.getItem('arrangementNamingMode') === 'legacy' ? 'legacy' : 'smart'; } catch (_) {}
+                                    sel.textContent = '';
+                                    for (const a of msg.arrangements) {
                                         const displayName = (namingMode === 'smart' && a.smart_name) ? a.smart_name : a.name;
                                         const label = namingMode === 'smart' ? displayName : `${displayName} (${a.notes})`;
-                                        return `<option value="${a.index}" ${a.index === msg.arrangement_index ? 'selected' : ''}>${label}</option>`;
-                                    }).join('');
+                                        const opt = document.createElement('option');
+                                        opt.value = a.index;
+                                        opt.selected = a.index === msg.arrangement_index;
+                                        opt.textContent = label;
+                                        sel.appendChild(opt);
+                                    }
                                 }
                             }
                             // Plugin context API — broadcast current song state

@@ -1174,6 +1174,13 @@ def load_song(extracted_dir: str) -> Song:
     # pathRhythm / pathBass / bonusArr / represent) because the XML files bundled
     # in official DLC PSARCs often have all path flags set to "0", while the
     # manifest correctly reflects what the authoring tool wrote.
+    def _mprop_int(key: str, props: dict) -> int:
+        val = props.get(key, 0)
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return 0
+
     _manifest_names: dict[str, str] = {}
     _manifest_path_flags: dict[str, dict] = {}
     for jf in Path(extracted_dir).rglob("*.json"):
@@ -1188,18 +1195,12 @@ def load_song(extracted_dir: str) -> Song:
                     # Match by JSON filename stem (same as XML stem)
                     _manifest_names[stem] = arr_name
                     props = attrs.get("ArrangementProperties") or {}
-                    def _mprop_int(key: str) -> int:
-                        val = props.get(key, 0)
-                        try:
-                            return int(val)
-                        except (TypeError, ValueError):
-                            return 0
                     _manifest_path_flags[stem] = {
-                        "path_lead": bool(_mprop_int("pathLead")),
-                        "path_rhythm": bool(_mprop_int("pathRhythm")),
-                        "path_bass": bool(_mprop_int("pathBass")),
-                        "bonus_arr": bool(_mprop_int("bonusArr")),
-                        "represent": _mprop_int("represent"),
+                        "path_lead": bool(_mprop_int("pathLead", props)),
+                        "path_rhythm": bool(_mprop_int("pathRhythm", props)),
+                        "path_bass": bool(_mprop_int("pathBass", props)),
+                        "bonus_arr": bool(_mprop_int("bonusArr", props)),
+                        "represent": _mprop_int("represent", props),
                     }
         except Exception:
             continue

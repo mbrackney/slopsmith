@@ -507,14 +507,18 @@ class MetadataDB:
                         f"json_extract(value, '$.smart_name') LIKE ? OR "
                         f"json_extract(value, '$.smart_name') LIKE ?"
                         ")) OR ("
-                        "json_extract(value, '$.smart_name') IS NULL AND "
-                        "json_extract(value, '$.name') = ?)"
+                        "json_extract(value, '$.smart_name') IS NULL AND ("
+                        "json_extract(value, '$.name') = ? OR "
+                        "json_extract(value, '$.name') LIKE ? OR "
+                        "json_extract(value, '$.name') LIKE ?))"
                     )
                     params += [
                         arr_type,
                         f"Alt. {arr_type}%",
                         f"Bonus {arr_type}%",
                         arr_type,
+                        f"Alt. {arr_type}%",
+                        f"Bonus {arr_type}%",
                     ]
                 where += (
                     " AND EXISTS (SELECT 1 FROM json_each(songs.arrangements) WHERE "
@@ -537,14 +541,18 @@ class MetadataDB:
                         f"json_extract(value, '$.smart_name') LIKE ? OR "
                         f"json_extract(value, '$.smart_name') LIKE ?"
                         ")) OR ("
-                        "json_extract(value, '$.smart_name') IS NULL AND "
-                        "json_extract(value, '$.name') = ?)"
+                        "json_extract(value, '$.smart_name') IS NULL AND ("
+                        "json_extract(value, '$.name') = ? OR "
+                        "json_extract(value, '$.name') LIKE ? OR "
+                        "json_extract(value, '$.name') LIKE ?))"
                     )
                     params += [
                         arr_type,
                         f"Alt. {arr_type}%",
                         f"Bonus {arr_type}%",
                         arr_type,
+                        f"Alt. {arr_type}%",
+                        f"Bonus {arr_type}%",
                     ]
                 where += (
                     " AND NOT EXISTS (SELECT 1 FROM json_each(songs.arrangements) WHERE "
@@ -1025,6 +1033,24 @@ def _require_library_provider_capability(provider: object, capability: str) -> N
     )
 
 
+def _filter_provider_kwargs(method: object, kwargs: dict) -> dict:
+    """Drop kwargs that the method's signature does not declare.
+
+    Provides backward-compat for third-party library providers whose
+    query_page/query_artists/query_stats methods were written before
+    naming_mode was added — calling them with the extra kwarg would
+    raise TypeError and return a 500 to the client.
+    """
+    try:
+        sig = inspect.signature(method)  # type: ignore[arg-type]
+        for p in sig.parameters.values():
+            if p.kind == inspect.Parameter.VAR_KEYWORD:
+                return kwargs  # method accepts **kwargs, pass everything
+        return {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except (ValueError, TypeError):
+        return kwargs
+
+
 def _call_library_provider(provider: object, method_name: str, **kwargs) -> Any:
     method = library_providers.provider_method(provider, method_name)
     if not callable(method):
@@ -1034,7 +1060,7 @@ def _call_library_provider(provider: object, method_name: str, **kwargs) -> Any:
             detail=f"Library provider {provider_id!r} does not support {method_name}",
         )
     try:
-        return method(**kwargs)
+        return method(**_filter_provider_kwargs(method, kwargs))
     except HTTPException:
         raise
     except Exception as exc:
@@ -1077,7 +1103,7 @@ async def _call_library_provider_async(provider: object, method_name: str, **kwa
     if _is_async_callable(method):
         # Async provider method — call directly on the event loop.
         try:
-            return await method(**kwargs)
+            return await method(**_filter_provider_kwargs(method, kwargs))
         except HTTPException:
             raise
         except Exception as exc:
@@ -1756,9 +1782,11 @@ def _background_scan():
         if not cached:
             to_scan.append((f, mtime, size))
         elif cached.get("arrangements") and any(
-            "smart_name" not in a for a in cached["arrangements"]
+            "smart_name" not in a or a.get("smart_name") is None
+            for a in cached["arrangements"]
         ):
-            # Row was scanned before smart naming was introduced — force a
+            # Row was scanned before smart naming was introduced, or has an
+            # explicit null smart_name (e.g. duplicate raw names) — force a
             # rescan so the DB picks up authoritative path flags from the
             # manifest JSON and stores correct smart_name values.
             to_scan.append((f, mtime, size))
