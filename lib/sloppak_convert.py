@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -1019,6 +1020,13 @@ def _load_lyrics_for_pitch(lyrics_path: Path) -> list[dict] | None:
         if isinstance(t, bool) or isinstance(d, bool):
             continue
         if not isinstance(t, (int, float)) or not isinstance(d, (int, float)):
+            continue
+        # `json.loads` accepts the non-standard `NaN`/`Infinity`/`-Infinity`
+        # literals by default and turns them into Python floats — so the
+        # isinstance check above passes them through. Filter explicitly so
+        # they don't reach extract_pitch_remote() (which would re-serialize
+        # them and trigger a strict-server 4xx, or worse).
+        if not math.isfinite(float(t)) or not math.isfinite(float(d)):
             continue
         out.append(entry)
     return out or None

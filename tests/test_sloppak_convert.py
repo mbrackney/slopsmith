@@ -858,6 +858,29 @@ def test_load_lyrics_for_pitch_returns_none_when_all_entries_filtered(tmp_path):
     assert sloppak_convert._load_lyrics_for_pitch(p) is None
 
 
+def test_load_lyrics_for_pitch_filters_non_finite_t_or_d(tmp_path):
+    """`json.loads` accepts the non-standard `NaN`/`Infinity` literals
+    by default, so the isinstance(_, float) check alone would pass them
+    through to the /pitch endpoint and trigger a strict-server 4xx (or
+    worse — get fed to CREPE and silently corrupt the timing). Filter
+    explicitly client-side so non-finite values never leave this loader."""
+    # Use python literals directly to bypass json's NaN-permissiveness;
+    # mock the loader's file content by passing a dict shape with these
+    # values directly via the json round-trip.
+    p = tmp_path / "lyrics.json"
+    # Python's json.dumps with allow_nan=True (the default) emits these
+    # as bare `NaN` / `Infinity` tokens which json.loads round-trips.
+    p.write_text(
+        '[{"t": 0.0, "d": 0.5, "w": "ok"},'
+        ' {"t": NaN, "d": 0.5, "w": "nan-t"},'
+        ' {"t": 0.0, "d": Infinity, "w": "inf-d"},'
+        ' {"t": -Infinity, "d": 0.5, "w": "neg-inf-t"}]',
+        encoding="utf-8",
+    )
+    out = sloppak_convert._load_lyrics_for_pitch(p)
+    assert out == [{"t": 0.0, "d": 0.5, "w": "ok"}]
+
+
 def test_load_lyrics_for_pitch_filters_non_numeric_t_or_d(tmp_path):
     """The /pitch endpoint rejects non-numeric t/d server-side with a 4xx;
     filter those out client-side so we don't waste a round-trip and so the
