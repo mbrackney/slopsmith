@@ -277,7 +277,12 @@ def _ensure_smart_names(arrangements: list[dict]) -> list[dict]:
         # may assign the same smart type a scanned row already owns — emit
         # None for the missing entries and let the legacy name show through
         # until the background rescan corrects them.
-        all_names = [a.get("name", "") for a in arrangements]
+        # Coerce to str so a malformed cached row with a list/dict name
+        # doesn't blow up the set() conversion (and every query that hits it).
+        all_names = [
+            a.get("name", "") if isinstance(a.get("name"), str) else str(a.get("name", ""))
+            for a in arrangements
+        ]
         has_duplicates = len(all_names) != len(set(all_names))
         if has_duplicates:
             for a in arrangements:
@@ -459,12 +464,30 @@ class MetadataDB:
     # parameters are bound, but capping the input space is still cheap
     # defense-in-depth (see slopsmith#129).
     _ALLOWED_ARRANGEMENT_NAMES = {"Lead", "Rhythm", "Bass", "Combo"}
+    # Per-smart-type list of (sql_op, sql_param) pairs appended to the SQL
+    # name-fallback branch (key-absent smart_name). Covers legacy raw names
+    # and load_song()'s synthesised display names that map to each smart type.
+    _SMART_NULL_FALLBACK_EXTRAS: dict[str, tuple[tuple[str, str], ...]] = {
+        "Lead": (("=", "Combo"), ("LIKE", "Alt. Combo%"), ("LIKE", "Bonus Combo%")),
+        "Bass": (("=", "Bass 2"),),
+    }
     # Stem ids match the bare strings sloppak manifests use today —
     # `full`, `guitar`, `bass`, `drums`, `vocals`, `piano`, `other`. The
     # frontend filter UI omits `full` (it's the always-on fallback mix
     # and would match every sloppak), but the server-side whitelist
     # keeps it so a hand-rolled API client can still ask for it.
     _ALLOWED_STEM_IDS = {"full", "guitar", "bass", "drums", "vocals", "piano", "other"}
+
+    @classmethod
+    def _smart_null_extras(cls, arr_type: str) -> tuple[str, list[str]]:
+        """Return (sql_fragment, bound_params) for the extra raw-name terms to
+        OR into the key-absent NULL-smart_name fallback branch for arr_type.
+        Empty when no extras are defined."""
+        terms = cls._SMART_NULL_FALLBACK_EXTRAS.get(arr_type, ())
+        fragment = "".join(
+            f" OR json_extract(value, '$.name') {op} ?" for op, _ in terms
+        )
+        return fragment, [val for _, val in terms]
 
     def _build_where(self, q: str = "", favorites_only: bool = False,
                      format_filter: str = "",
@@ -509,15 +532,12 @@ class MetadataDB:
             if naming_mode == "smart":
                 clauses = []
                 for arr_type in arr_has:
-                    # For Lead, also match legacy raw name 'Combo' in the NULL-smart_name
-                    # branch — _ensure_smart_names() maps name='Combo' → smart_name='Lead'
-                    # via the name-based fallback, so unscanned rows must be treated the same.
-                    extra_null = (
-                        " OR json_extract(value, '$.name') = ?"
-                        " OR json_extract(value, '$.name') LIKE ?"
-                        " OR json_extract(value, '$.name') LIKE ?"
-                    ) if arr_type == "Lead" else ""
-                    extra_null_params = ["Combo", "Alt. Combo%", "Bonus Combo%"] if arr_type == "Lead" else []
+                    # Extra raw-name fragments matched only in the key-absent
+                    # NULL-smart_name fallback branch — they cover the legacy
+                    # display names that map to this smart type:
+                    #   Lead: "Combo" (combined guitar) + Alt./Bonus Combo
+                    #   Bass: "Bass 2" (load_song synthesises for real_bass_22)
+                    extra_null, extra_null_params = self._smart_null_extras(arr_type)
                     # json_type() returns NULL when the key is absent and the
                     # string 'null' when the key exists with explicit JSON null
                     # (set by the scanner for ambiguous duplicate-name rows).
@@ -560,12 +580,7 @@ class MetadataDB:
             if naming_mode == "smart":
                 clauses = []
                 for arr_type in arr_lacks:
-                    extra_null = (
-                        " OR json_extract(value, '$.name') = ?"
-                        " OR json_extract(value, '$.name') LIKE ?"
-                        " OR json_extract(value, '$.name') LIKE ?"
-                    ) if arr_type == "Lead" else ""
-                    extra_null_params = ["Combo", "Alt. Combo%", "Bonus Combo%"] if arr_type == "Lead" else []
+                    extra_null, extra_null_params = self._smart_null_extras(arr_type)
                     # See "has" branch above for the json_type rationale.
                     # Extra branch (vs `has`): an explicit smart_name=null
                     # arrangement is ambiguous; we don't know whether it's
