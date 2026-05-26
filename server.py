@@ -566,18 +566,21 @@ class MetadataDB:
                         " OR json_extract(value, '$.name') LIKE ?"
                     ) if arr_type == "Lead" else ""
                     extra_null_params = ["Combo", "Alt. Combo%", "Bonus Combo%"] if arr_type == "Lead" else []
-                    # json_type() returns NULL when the key is absent and the
-                    # string 'null' when the key exists with explicit JSON null
-                    # (set by the scanner for ambiguous duplicate-name rows).
-                    # Name-fallback only applies to key-absent rows so an
-                    # explicit null suppresses the fallback and lets the
-                    # background rescan resolve the ambiguity authoritatively.
+                    # See "has" branch above for the json_type rationale.
+                    # Extra branch (vs `has`): an explicit smart_name=null
+                    # arrangement is ambiguous; we don't know whether it's
+                    # `arr_type` or not. Be conservative and treat it as
+                    # potentially matching, so `arrangements_lacks` excludes
+                    # the parent row instead of falsely claiming it lacks
+                    # `arr_type`. The background rescan resolves the ambiguity.
                     clauses.append(
                         "(json_extract(value, '$.smart_name') IS NOT NULL AND ("
                         f"json_extract(value, '$.smart_name') = ? OR "
                         f"json_extract(value, '$.smart_name') LIKE ? OR "
                         f"json_extract(value, '$.smart_name') LIKE ?"
                         ")) OR ("
+                        "json_type(value, '$.smart_name') = 'null'"
+                        ") OR ("
                         "json_type(value, '$.smart_name') IS NULL AND ("
                         "json_extract(value, '$.name') = ? OR "
                         "json_extract(value, '$.name') LIKE ? OR "

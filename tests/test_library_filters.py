@@ -166,11 +166,13 @@ def test_smart_mode_combo_normalized_to_lead(client, seeded_smart):
 
 def test_smart_mode_lacks_lead_excludes_alt_lead(client, seeded_smart):
     # arrangements_lacks=Lead must exclude rows whose smart_name is any Lead
-    # variant (Lead / Alt. Lead / Bonus Lead).
+    # variant (Lead / Alt. Lead / Bonus Lead) AND ambiguous rows whose
+    # smart_name is explicitly null (we don't know if they have Lead).
     data = _get(client, arrangements_lacks="Lead", naming_mode="smart")
     files = {s["filename"] for s in data["songs"]}
     assert "alt.psarc" not in files
     assert "combo-old.psarc" not in files
+    assert "combo-ambig.psarc" not in files  # ambiguous — don't claim it lacks Lead
     assert "bonus.psarc" in files  # has Bonus Rhythm, no Lead variant
 
 
