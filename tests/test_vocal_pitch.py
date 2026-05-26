@@ -164,6 +164,27 @@ def test_extract_pitch_remote_filters_malformed_entries(tmp_path, monkeypatch):
     ]
 
 
+def test_extract_pitch_remote_filters_non_finite_server_notes(tmp_path, monkeypatch):
+    """A misbehaving server (or numerical edge in CREPE) could surface
+    NaN/±Inf for t or d. They must not reach the on-disk vocal_pitch.json
+    — strict-JSON consumers (e.g. browser JSON.parse) would reject the
+    non-standard NaN/Infinity tokens that allow_nan=True would emit."""
+    vocals = tmp_path / "vocals.ogg"
+    vocals.write_bytes(b"")
+    _stub_post(monkeypatch, {}, _FakeResponse(json_body={"notes": [
+        {"t": 1.0, "d": 0.5, "midi": 64},                # kept
+        {"t": float("nan"), "d": 0.5, "midi": 60},       # filtered
+        {"t": 0.0, "d": float("inf"), "midi": 60},       # filtered
+        {"t": float("-inf"), "d": 0.5, "midi": 60},      # filtered
+        {"t": 2.0, "d": 0.3, "midi": 67},                # kept
+    ]}))
+    got = extract_pitch_remote(vocals, [{"t": 0, "d": 0.1, "w": "x"}], "http://s:7865")
+    assert got == [
+        {"t": 1.0, "d": 0.5, "midi": 64},
+        {"t": 2.0, "d": 0.3, "midi": 67},
+    ]
+
+
 def test_extract_pitch_remote_rounds_to_three_decimals(tmp_path, monkeypatch):
     vocals = tmp_path / "vocals.ogg"
     vocals.write_bytes(b"")

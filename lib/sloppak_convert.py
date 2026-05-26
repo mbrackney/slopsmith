@@ -1423,8 +1423,16 @@ def _maybe_extract_pitch(
         "version": PITCH_EXTRACTION_SCHEMA_VERSION,
     }
     try:
+        # `allow_nan=False` so non-finite floats raise ValueError here
+        # rather than silently writing non-standard `NaN`/`Infinity`
+        # tokens that strict JSON consumers (e.g. browsers,
+        # `json.loads` with `parse_constant`) would reject. Belt-and-
+        # braces — `extract_pitch_remote` already filters non-finite
+        # values on the way in, but this catches a future call site
+        # that bypasses that loader.
         pitch_path.write_text(
-            json.dumps(pitch_payload, separators=(",", ":")), encoding="utf-8"
+            json.dumps(pitch_payload, separators=(",", ":"), allow_nan=False),
+            encoding="utf-8",
         )
         _rewrite_pitch_manifest(
             source_dir, "vocal_pitch.json", extraction=extraction_meta,

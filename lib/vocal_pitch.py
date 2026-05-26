@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -158,7 +159,10 @@ def extract_pitch_remote(
 
     # Defensive: skip malformed entries entirely rather than crashing
     # the whole pass on one bad record. Same posture as the WhisperX
-    # remote path.
+    # remote path. Non-finite t/d (NaN, ±Inf — a misbehaving server or
+    # a numerical edge in CREPE could surface them) are also filtered
+    # so they can't reach the on-disk vocal_pitch.json and break
+    # strict-JSON consumers downstream.
     out: list[dict] = []
     for n in raw_notes:
         if not isinstance(n, dict):
@@ -166,9 +170,13 @@ def extract_pitch_remote(
         if "t" not in n or "d" not in n or "midi" not in n:
             continue
         try:
+            t = float(n["t"])
+            d = float(n["d"])
+            if not math.isfinite(t) or not math.isfinite(d):
+                continue
             out.append({
-                "t": round(float(n["t"]), 3),
-                "d": round(float(n["d"]), 3),
+                "t": round(t, 3),
+                "d": round(d, 3),
                 "midi": int(n["midi"]),
             })
         except (TypeError, ValueError):

@@ -787,6 +787,30 @@ def test_maybe_extract_pitch_swallows_remote_failure(tmp_path, monkeypatch):
     assert not (src / "vocal_pitch.json").exists()
 
 
+def test_maybe_extract_pitch_persists_with_allow_nan_false(tmp_path, monkeypatch):
+    """vocal_pitch.json must never contain `NaN`/`Infinity` tokens —
+    they're non-standard JSON and break strict consumers (browsers'
+    JSON.parse rejects them outright). The persistence path uses
+    allow_nan=False so a future caller that bypasses the
+    extract_pitch_remote filter would surface a ValueError at write
+    time rather than poison the on-disk file."""
+    src = _make_sloppak_with_vocals(tmp_path)
+    _patch_pitch_config(monkeypatch)
+
+    import vocal_pitch
+    monkeypatch.setattr(vocal_pitch, "extract_pitch_remote",
+                        lambda *a, **kw: [{"t": float("nan"), "d": 0.5, "midi": 64}])
+
+    out = sloppak_convert._maybe_extract_pitch(
+        src, [{"t": 0.0, "d": 0.5, "w": "hi"}], src / "stems" / "vocals.ogg",
+    )
+    # Best-effort: the ValueError from allow_nan=False is caught + logged
+    # as warning, returns False. Crucially, vocal_pitch.json was NOT
+    # written with a NaN/Infinity token poisoning future reads.
+    assert out is False
+    assert not (src / "vocal_pitch.json").exists()
+
+
 def test_maybe_extract_pitch_writes_file_and_manifest(tmp_path, monkeypatch):
     src = _make_sloppak_with_vocals(tmp_path)
     _patch_pitch_config(monkeypatch)
